@@ -47,6 +47,7 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) \
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForMultipleChoice, BertTokenizer),
+    # 'xlnet': (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer)
 }
 
 class SwagExample(object):
@@ -119,9 +120,9 @@ def read_swag_examples(input_dir, is_training=True):
 
     examples = []
     files = glob.glob(str(input_dir) + "/middle/*txt")
-    logger.info(F"DIR {input_dir} middle numbers: {len(files)}")
+    logger.info("DIR %s middle numbers: %s", input_dir, str(len(files)))
     files += glob.glob(str(input_dir) + "/high/*txt")
-    logger.info(F"DIr {input_dir} high + middle: {len(files)}")
+    logger.info("DIR %s high + middle: %s", input_dir, str(len(files)))
 
     for file in tqdm(files):
         with open(file, 'r', encoding='utf-8') as fin:
@@ -148,7 +149,7 @@ def read_swag_examples(input_dir, is_training=True):
     if is_training:
         assert len(examples) > 1
         assert examples[0].label is not None
-    logger.info(F"len examples: {len(examples)}")
+    logger.info("len examples: %s", str(len(examples)))
     return examples
 
 def convert_examples_to_features(examples, tokenizer, max_seq_length,

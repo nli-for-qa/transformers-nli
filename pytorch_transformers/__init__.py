@@ -30,6 +30,7 @@ from .modeling_gpt2 import (GPT2Config, GPT2PreTrainedModel, GPT2Model,
 from .modeling_xlnet import (XLNetConfig,
                              XLNetPreTrainedModel, XLNetModel, XLNetLMHeadModel,
                              XLNetForSequenceClassification, XLNetForQuestionAnswering,
+                             XLNetForMultipleChoice,
                              load_tf_weights_in_xlnet, XLNET_PRETRAINED_CONFIG_ARCHIVE_MAP,
                              XLNET_PRETRAINED_MODEL_ARCHIVE_MAP)
 from .modeling_xlm import (XLMConfig, XLMPreTrainedModel , XLMModel,
