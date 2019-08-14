@@ -174,14 +174,20 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
     features = []
     for example_index, example in tqdm(enumerate(examples)):
         context_tokens = tokenizer.tokenize(example.context_sentence)
-        start_ending_tokens = tokenizer.tokenize(example.start_ending)
+        under_line_idx = example.start_ending.find("_")
 
         choices_features = []
         for ending_index, ending in enumerate(example.endings):
             # We create a copy of the context tokens in order to be
             # able to shrink it according to ending_tokens
             context_tokens_choice = context_tokens[:]
-            ending_tokens = start_ending_tokens + tokenizer.tokenize(ending)
+
+            if under_line_idx != -1:
+                start_ending = example.start_ending.replace("_", ending)
+                ending_tokens = tokenizer.tokenize(start_ending)
+            else:
+                start_ending_tokens = tokenizer.tokenize(example.start_ending)
+                ending_tokens = start_ending_tokens + tokenizer.tokenize(ending)
             # Modifies `context_tokens_choice` and `ending_tokens` in
             # place so that the total length is less than the
             # specified length.  Account for [CLS], [SEP], [SEP] with
@@ -407,6 +413,8 @@ def train(args, train_dataset, model, tokenizer):
                             tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                    logger.info("Current average loss of global step %s (logging step: %s) step is %s", str(global_step),
+                                str(args.logging_steps), str((tr_loss - logging_loss)/args.logging_steps))
                     logging_loss = tr_loss
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -418,6 +426,7 @@ def train(args, train_dataset, model, tokenizer):
                     model_to_save.save_pretrained(output_dir)
                     tokenizer.save_vocabulary(output_dir)
                     torch.save(args, os.path.join(output_dir, 'training_args.bin'))
+
                     logger.info("Saving model checkpoint to %s", output_dir)
 
             if args.max_steps > 0 and global_step > args.max_steps:
