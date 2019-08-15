@@ -242,9 +242,9 @@ def evaluate(args, model, tokenizer, prefix=""):
 
         eval_loss = eval_loss / nb_eval_steps
         preds = np.argmax(preds, axis=1)
-        result = simple_accuracy(preds, out_label_ids)
-        results.update({"eval_acc": result})
-        results.update(({"eval_loss": eval_loss}))
+        acc = simple_accuracy(preds, out_label_ids)
+        result = {"eval_acc": acc, "eval_loss": eval_loss}
+        results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -470,6 +470,8 @@ def main():
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
+        if not args.do_train:
+            args.output_dir = args.model_name_or_path
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
             checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
