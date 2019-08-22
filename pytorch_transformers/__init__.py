@@ -39,7 +39,7 @@ from .modeling_xlm import (XLMConfig, XLMPreTrainedModel , XLMModel,
                            XLMForQuestionAnswering, XLM_PRETRAINED_CONFIG_ARCHIVE_MAP,
                            XLM_PRETRAINED_MODEL_ARCHIVE_MAP)
 from .modeling_roberta import (RobertaConfig, RobertaForMaskedLM, RobertaModel, RobertaForSequenceClassification,
-                               RobertaForMultipleChoice,
+                               RobertaForMultipleChoice, RobertaForMultipleChoiceBag,
                                ROBERTA_PRETRAINED_CONFIG_ARCHIVE_MAP, ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP)
 from .modeling_utils import (WEIGHTS_NAME, CONFIG_NAME, TF_WEIGHTS_NAME,
                           PretrainedConfig, PreTrainedModel, prune_layer, Conv1D)

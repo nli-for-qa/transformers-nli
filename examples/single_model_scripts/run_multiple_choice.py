@@ -36,7 +36,8 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
                                   BertForMultipleChoice, BertTokenizer,
                                   XLNetConfig, XLNetForMultipleChoice,
                                   XLNetTokenizer, RobertaConfig,
-                                  RobertaForMultipleChoice, RobertaTokenizer)
+                                  RobertaForMultipleChoice, RobertaTokenizer,
+                                  RobertaForMultipleChoiceBag)
 
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
@@ -49,17 +50,32 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForMultipleChoice, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer),
-    'roberta': (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer)
+    'roberta': (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
+    'roberta-bag':(RobertaConfig, RobertaForMultipleChoiceBag, RobertaTokenizer)
 }
 
 def select_field(features, field):
-    return [
-        [
-            choice[field]
-            for choice in feature.choices_features
+    if type(features[0].choices_features[0]) is tuple:
+        return [
+            [
+                choice[field]
+                for choice in feature.choices_features
+            ]
+            for feature in features
         ]
-        for feature in features
-    ]
+    elif type(features[0].choices_features[0]) is list:
+        res = []
+        for feature in features:
+            tmp = []
+            for choice_features in feature.choices_features:
+                tmp1 = []
+                for choice in choice_features:
+                    tmp1.append(choice[field])
+                assert len(tmp1) == 10
+                tmp.append(tmp1)
+            assert len(tmp) == 4
+            res.append(tmp)
+        return res
 
 
 def simple_accuracy(preds, labels):
@@ -296,7 +312,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task)))
-    if os.path.exists(cached_features_file):
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:

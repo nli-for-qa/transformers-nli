@@ -61,14 +61,26 @@ class InputFeatures(object):
 
     ):
         self.example_id = example_id
-        self.choices_features = [
-            {
-                'input_ids': input_ids,
-                'input_mask': input_mask,
-                'segment_ids': segment_ids
-            }
-            for _, input_ids, input_mask, segment_ids in choices_features
-        ]
+        if type(choices_features[0]) is tuple:
+            self.choices_features = [
+                {
+                    'input_ids': input_ids,
+                    'input_mask': input_mask,
+                    'segment_ids': segment_ids
+                }
+                for _, input_ids, input_mask, segment_ids in choices_features
+            ]
+        elif type(choices_features[0]) is list:
+            self.choices_features = [[
+                {
+                    'input_ids': input_ids,
+                    'input_mask': input_mask,
+                    'segment_ids': segment_ids
+                }
+                for _, input_ids, input_mask, segment_ids in choice_features
+                ]
+                for choice_features in choices_features
+            ]
         self.label = label
 
 
@@ -363,6 +375,74 @@ class ArcSentSepProcessor(ArcProcessor):
         return examples
 
 
+class ArcSentSepBagProcessor(ArcProcessor):
+    """Processor for the MRPC data set (GLUE version)."""
+
+    def _create_examples(self, lines, type):
+        """Creates examples for the training and dev sets."""
+
+        def normalize(truth):
+            if truth in "ABCD":
+                return ord(truth) - ord("A")
+            elif truth in "1234":
+                return int(truth) - 1
+            else:
+                logger.info("truth ERROR!")
+        examples = []
+        three_choice = 0
+        four_choice = 0
+        five_choice = 0
+        other_choices = 0
+        from collections import Counter
+        context_len = Counter()
+        for line in tqdm.tqdm(lines, desc="read arc data"):
+            data_raw = json.loads(line.strip("\n"))
+            if len(data_raw["question"]["choices"]) == 3:
+                three_choice += 1
+                continue
+            elif len(data_raw["question"]["choices"]) == 5:
+                five_choice += 1
+                continue
+            elif len(data_raw["question"]["choices"]) != 4:
+                other_choices += 1
+                continue
+            four_choice += 1
+            truth = str(normalize(data_raw["answerKey"]))
+            question_choices = data_raw["question"]
+            question = question_choices["stem"]
+            id = data_raw["id"]
+            options = question_choices["choices"]
+            contexts = []
+            endings = []
+            for option in options:
+                context = []
+                for sentence in option["para"].replace("_", "").split("."):
+                    if len(sentence.split(" ")) < 4:
+                        continue
+                    context.append(sentence)
+                context_len[len(context)] += 1
+                contexts.append(context)
+                endings.append(option["text"])
+
+            if len(options) == 4:
+                examples.append(
+                    InputExample(
+                        example_id = id,
+                        question=question,
+                        contexts=contexts[:],
+                        endings=endings[:],
+                        label=truth))
+
+        if type == "train":
+            assert len(examples) > 1
+            assert examples[0].label is not None
+        logger.info("len examples: %s", str(len(examples)))
+        logger.info("Three choices: %s", str(three_choice))
+        logger.info("Five choices: %s", str(five_choice))
+        logger.info("Other choices: %s", str(other_choices))
+        logger.info("four choices: %s", str(four_choice))
+        return examples
+
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
@@ -392,81 +472,128 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         choices_features = []
-        for ending_idx, (context, ending) in enumerate(zip(example.contexts, example.endings)):
-            tokens_a = tokenizer.tokenize(context)
-            tokens_b = None
-            if example.question.find("_") != -1:
-                tokens_b = tokenizer.tokenize(example.question.replace("_", ending))
-            else:
-                tokens_b = tokenizer.tokenize(example.question + " " + ending)
-            special_tokens_count = 4 if sep_token_extra else 3
-            _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - special_tokens_count)
+        for ending_idx, (context_origin, ending) in enumerate(zip(example.contexts, example.endings)):
+            if type(context_origin) is str:
+                contexts = [context_origin]
+            elif type(context_origin) is list:
+                contexts = context_origin
+            choice_features = []
+            for context in contexts:
+                tokens_a = tokenizer.tokenize(context)
+                tokens_b = None
+                if example.question.find("_") != -1:
+                    tokens_b = tokenizer.tokenize(example.question.replace("_", ending))
+                else:
+                    tokens_b = tokenizer.tokenize(example.question + " " + ending)
+                special_tokens_count = 4 if sep_token_extra else 3
+                _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - special_tokens_count)
 
-            # The convention in BERT is:
-            # (a) For sequence pairs:
-            #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-            #  type_ids:   0   0  0    0    0     0       0   0   1  1  1  1   1   1
-            # (b) For single sequences:
-            #  tokens:   [CLS] the dog is hairy . [SEP]
-            #  type_ids:   0   0   0   0  0     0   0
-            #
-            # Where "type_ids" are used to indicate whether this is the first
-            # sequence or the second sequence. The embedding vectors for `type=0` and
-            # `type=1` were learned during pre-training and are added to the wordpiece
-            # embedding vector (and position vector). This is not *strictly* necessary
-            # since the [SEP] token unambiguously separates the sequences, but it makes
-            # it easier for the model to learn the concept of sequences.
-            #
-            # For classification tasks, the first vector (corresponding to [CLS]) is
-            # used as as the "sentence vector". Note that this only makes sense because
-            # the entire model is fine-tuned.
-            tokens = tokens_a + [sep_token]
-            if sep_token_extra:
-                # roberta uses an extra separator b/w pairs of sentences
-                tokens += [sep_token]
+                # The convention in BERT is:
+                # (a) For sequence pairs:
+                #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+                #  type_ids:   0   0  0    0    0     0       0   0   1  1  1  1   1   1
+                # (b) For single sequences:
+                #  tokens:   [CLS] the dog is hairy . [SEP]
+                #  type_ids:   0   0   0   0  0     0   0
+                #
+                # Where "type_ids" are used to indicate whether this is the first
+                # sequence or the second sequence. The embedding vectors for `type=0` and
+                # `type=1` were learned during pre-training and are added to the wordpiece
+                # embedding vector (and position vector). This is not *strictly* necessary
+                # since the [SEP] token unambiguously separates the sequences, but it makes
+                # it easier for the model to learn the concept of sequences.
+                #
+                # For classification tasks, the first vector (corresponding to [CLS]) is
+                # used as as the "sentence vector". Note that this only makes sense because
+                # the entire model is fine-tuned.
+                tokens = tokens_a + [sep_token]
+                if sep_token_extra:
+                    # roberta uses an extra separator b/w pairs of sentences
+                    tokens += [sep_token]
 
-            segment_ids = [sequence_a_segment_id] * len(tokens)
+                segment_ids = [sequence_a_segment_id] * len(tokens)
 
-            if tokens_b:
-                tokens += tokens_b + [sep_token]
-                segment_ids += [sequence_b_segment_id] * (len(tokens_b) + 1)
+                if tokens_b:
+                    tokens += tokens_b + [sep_token]
+                    segment_ids += [sequence_b_segment_id] * (len(tokens_b) + 1)
 
-            if cls_token_at_end:
-                tokens = tokens + [cls_token]
-                segment_ids = segment_ids + [cls_token_segment_id]
-            else:
-                tokens = [cls_token] + tokens
-                segment_ids = [cls_token_segment_id] + segment_ids
+                if cls_token_at_end:
+                    tokens = tokens + [cls_token]
+                    segment_ids = segment_ids + [cls_token_segment_id]
+                else:
+                    tokens = [cls_token] + tokens
+                    segment_ids = [cls_token_segment_id] + segment_ids
 
-            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+                input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
-            # The mask has 1 for real tokens and 0 for padding tokens. Only real
-            # tokens are attended to.
-            input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
+                # The mask has 1 for real tokens and 0 for padding tokens. Only real
+                # tokens are attended to.
+                input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
 
-            # Zero-pad up to the sequence length.
-            padding_length = max_seq_length - len(input_ids)
-            if pad_on_left:
-                input_ids = ([pad_token] * padding_length) + input_ids
-                input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
-                segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
-            else:
-                input_ids = input_ids + ([pad_token] * padding_length)
-                input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
-                segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
+                # Zero-pad up to the sequence length.
+                padding_length = max_seq_length - len(input_ids)
+                if pad_on_left:
+                    input_ids = ([pad_token] * padding_length) + input_ids
+                    input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
+                    segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
+                else:
+                    input_ids = input_ids + ([pad_token] * padding_length)
+                    input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
+                    segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
 
-            assert len(input_ids) == max_seq_length
-            assert len(input_mask) == max_seq_length
-            assert len(segment_ids) == max_seq_length
-            choices_features.append((tokens, input_ids, input_mask, segment_ids))
+                assert len(input_ids) == max_seq_length
+                assert len(input_mask) == max_seq_length
+                assert len(segment_ids) == max_seq_length
+
+                choice_features.append((tokens, input_ids, input_mask, segment_ids))
+            if type(context_origin) == str:
+                choice_features = choice_features[0]
+            elif type(context_origin) == list:
+                if len(choice_features) < 10:
+                    pad_num = 10 - len(choice_features)
+
+                    tokens = [pad_token]
+                    segment_ids = [pad_token_segment_id]
+                    if cls_token_at_end:
+                        tokens = tokens + [cls_token]
+                        segment_ids = segment_ids + [cls_token_segment_id]
+                    else:
+                        tokens = [cls_token] + tokens
+                        segment_ids = [cls_token_segment_id] + segment_ids
+                    input_ids = tokenizer.convert_tokens_to_ids(tokens)
+                    input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
+                    padding_length = max_seq_length - len(input_ids)
+
+                    if pad_on_left:
+                        input_ids = ([pad_token] * padding_length) + input_ids
+                        input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
+                        segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
+                    else:
+                        input_ids = input_ids + ([pad_token] * padding_length)
+                        input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
+                        segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
+
+                    assert len(input_ids) == max_seq_length
+                    assert len(input_mask) == max_seq_length
+                    assert len(segment_ids) == max_seq_length
+
+                    choice_features += [(tokens, input_ids, input_mask, segment_ids) for _ in range(pad_num)]
+                else:
+                    choice_features = choice_features[:10]
+
+            choices_features.append(choice_features)
 
         label = label_map[example.label]
 
         if ex_index < 2:
             logger.info("*** Example ***")
             logger.info("race_id: {}".format(example.example_id))
-
-            for choice_idx, (tokens, input_ids, input_mask, segment_ids) in enumerate(choices_features):
+            log_choices_features = None
+            if type(choices_features[0]) is str:
+                log_choices_features = choices_features
+            elif type(choices_features[0]) is list:
+                log_choices_features = [x[0] for x in choices_features]
+            for choice_idx, (tokens, input_ids, input_mask, segment_ids) in enumerate(log_choices_features):
                 logger.info("choice: {}".format(choice_idx))
                 logger.info("tokens: {}".format(' '.join(tokens)))
                 logger.info("input_ids: {}".format(' '.join(map(str, input_ids))))
@@ -477,7 +604,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
         features.append(
             InputFeatures(
                 example_id = example.example_id,
-                choices_features = choices_features,
+                choices_features = choices_features[:],
                 label = label
             )
         )
@@ -506,7 +633,8 @@ processors = {
     "race": RaceProcessor,
     "swag": SwagProcessor,
     "arc": ArcProcessor,
-    "arc_sent_sep": ArcSentSepProcessor
+    "arc_sent_sep": ArcSentSepProcessor,
+    "arc_sent_bag": ArcSentSepBagProcessor
 }
 
 
@@ -514,5 +642,6 @@ GLUE_TASKS_NUM_LABELS = {
     "race", 4,
     "swag", 4,
     "arc", 4,
-    "arc_sent_sep", 4
+    "arc_sent_sep", 4,
+    "arc_sent_bag", 4
 }
