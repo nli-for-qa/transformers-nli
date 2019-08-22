@@ -247,6 +247,8 @@ class ArcProcessor(DataProcessor):
                 return ord(truth) - ord("A")
             elif truth in "1234":
                 return int(truth) - 1
+            elif truth in "0123":
+                return int(truth)
             else:
                 logger.info("truth ERROR!")
         examples = []
@@ -292,6 +294,75 @@ class ArcProcessor(DataProcessor):
         logger.info("four choices: %s", str(four_choice))
 
         return examples
+
+class ArcSentSepProcessor(ArcProcessor):
+    """Processor for the MRPC data set (GLUE version)."""
+
+    def _create_examples(self, lines, type):
+        """Creates examples for the training and dev sets."""
+
+        def normalize(truth):
+            if truth in "ABCD":
+                return ord(truth) - ord("A")
+            elif truth in "1234":
+                return int(truth) - 1
+            else:
+                logger.info("truth ERROR!")
+        examples = []
+        three_choice = 0
+        four_choice = 0
+        five_choice = 0
+        other_choices = 0
+        for line in tqdm.tqdm(lines, desc="read arc data"):
+            data_raw = json.loads(line.strip("\n"))
+            if len(data_raw["question"]["choices"]) == 3:
+                three_choice += 1
+                continue
+            elif len(data_raw["question"]["choices"]) == 5:
+                five_choice += 1
+                continue
+            elif len(data_raw["question"]["choices"]) != 4:
+                other_choices += 1
+                continue
+            four_choice += 1
+            truth = str(normalize(data_raw["answerKey"]))
+            question_choices = data_raw["question"]
+            question = question_choices["stem"]
+            id = data_raw["id"]
+            options = question_choices["choices"]
+            contexts = []
+            endings = []
+            for option in options:
+                context = []
+                for sentence in option["para"].replace("_", "").split("."):
+                    if len(sentence) < 2:
+                        continue
+                    context.append("<s> " + sentence + " <\s>")
+
+                contexts.append("".join(context))
+                endings.append(option["text"])
+
+            if len(options) == 4:
+                examples.append(
+                    InputExample(
+                        example_id = id,
+                        question=question,
+                        contexts=contexts,
+                        endings=endings,
+                        label=truth))
+
+        if type == "train":
+            assert len(examples) > 1
+            assert examples[0].label is not None
+        logger.info("len examples: %s", str(len(examples)))
+        logger.info("Three choices: %s", str(three_choice))
+        logger.info("Five choices: %s", str(five_choice))
+        logger.info("Other choices: %s", str(other_choices))
+        logger.info("four choices: %s", str(four_choice))
+
+        return examples
+
+
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
@@ -388,11 +459,13 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
             choices_features.append((tokens, input_ids, input_mask, segment_ids))
+
         label = label_map[example.label]
 
         if ex_index < 2:
             logger.info("*** Example ***")
             logger.info("race_id: {}".format(example.example_id))
+
             for choice_idx, (tokens, input_ids, input_mask, segment_ids) in enumerate(choices_features):
                 logger.info("choice: {}".format(choice_idx))
                 logger.info("tokens: {}".format(' '.join(tokens)))
@@ -432,12 +505,14 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 processors = {
     "race": RaceProcessor,
     "swag": SwagProcessor,
-    "arc": ArcProcessor
+    "arc": ArcProcessor,
+    "arc_sent_sep": ArcSentSepProcessor
 }
 
 
 GLUE_TASKS_NUM_LABELS = {
     "race", 4,
     "swag", 4,
-    "arc", 4
+    "arc", 4,
+    "arc_sent_sep", 4
 }
