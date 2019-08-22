@@ -22,7 +22,7 @@ import glob
 import logging
 import os
 import random
-
+import json
 
 import numpy as np
 import torch
@@ -169,7 +169,7 @@ def train(args, train_dataset, model, tokenizer):
                         results = evaluate(args, model, tokenizer)
                         for key, value in results.items():
                             tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
-                        if results["eval_loss"] < best_dev_loss:
+                        if results["eval_acc"] > best_dev_acc:
                             best_dev_acc = results["eval_acc"]
                             best_dev_loss = results["eval_loss"]
                             best_steps = global_step
@@ -254,8 +254,8 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
-        preds = np.argmax(preds, axis=1)
-        acc = simple_accuracy(preds, out_label_ids)
+        preds_label = np.argmax(preds, axis=1)
+        acc = simple_accuracy(preds_label, out_label_ids)
         result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
 
@@ -269,6 +269,9 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer.write("train num epochs=%d\n" % args.num_train_epochs)
             writer.write("fp16            =%s\n" % args.fp16)
             writer.write("max seq length  =%d\n" % args.max_seq_length)
+            writer.write("predict results of json format:\n")
+            writer.write(json.dumps(preds_label.tolist(), ensure_ascii=False))
+            writer.write(json.dumps(out_label_ids.tolist(), ensure_ascii=False))
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
