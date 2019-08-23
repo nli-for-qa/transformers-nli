@@ -55,7 +55,7 @@ MODEL_CLASSES = {
 }
 
 def select_field(features, field):
-    if type(features[0].choices_features[0]) is tuple:
+    if type(features[0].choices_features[0]) is dict:
         return [
             [
                 choice[field]

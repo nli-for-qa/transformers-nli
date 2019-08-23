@@ -589,7 +589,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             logger.info("*** Example ***")
             logger.info("race_id: {}".format(example.example_id))
             log_choices_features = None
-            if type(choices_features[0]) is str:
+            if type(choices_features[0]) is tuple:
                 log_choices_features = choices_features
             elif type(choices_features[0]) is list:
                 log_choices_features = [x[0] for x in choices_features]
