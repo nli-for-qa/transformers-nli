@@ -26,6 +26,7 @@ import json
 import csv
 import glob
 import tqdm
+import pandas as pd
 
 
 logger = logging.getLogger(__name__)
@@ -627,6 +628,20 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
             tokens_a.pop()
         else:
             tokens_b.pop()
+def write_predict(output_file, pred_ids=None, label_ids=None, preds=None):
+    assert pred_ids is not None
+    assert label_ids is not None
+    assert preds is not None
+
+    preds = preds.tolist()
+    label_ids = label_ids.tolist()
+    pred_ids = pred_ids.tolist()
+    assert len(pred_ids) == len(label_ids)
+    with open(output_file, 'w') as fout:
+        json.dump({"preds": preds, "pred_ids": pred_ids, "label_ids": label_ids}, fout)
+
+
+
 
 
 processors = {

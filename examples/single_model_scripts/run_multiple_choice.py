@@ -41,7 +41,7 @@ from pytorch_transformers import (WEIGHTS_NAME, BertConfig,
 
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
-from utils_multiple_choice import (convert_examples_to_features, processors)
+from utils_multiple_choice import (convert_examples_to_features, processors, write_predict)
 
 logger = logging.getLogger(__name__)
 
@@ -286,11 +286,14 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer.write("fp16            =%s\n" % args.fp16)
             writer.write("max seq length  =%d\n" % args.max_seq_length)
             writer.write("predict results of json format:\n")
-            writer.write(json.dumps(preds_label.tolist(), ensure_ascii=False))
+            writer.write(json.dumps(preds_label.tolist(), ensure_ascii=False) + "\n")
             writer.write(json.dumps(out_label_ids.tolist(), ensure_ascii=False))
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+        results["preds"] = preds
+        results["out_label_ids"] = out_label_ids
+        results["pred_label_ids"] = preds_label
     return results
 
 
@@ -534,23 +537,24 @@ def main():
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=global_step)
-            result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
+            result = dict((k + '_dev_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 
     if args.do_test and args.local_rank in [-1, 0]:
         if not args.do_train:
             args.output_dir = args.model_name_or_path
         checkpoints = [args.output_dir]
-        if args.eval_all_checkpoints:
-            checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
-            logging.getLogger("pytorch_transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+        # if args.eval_all_checkpoints:
+        #     checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
+        #     logging.getLogger("pytorch_transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=global_step, test=True)
-            result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
+            result = dict((k + '_test_{}'.format(global_step), v) for k, v in result.items())
+            write_predict(os.path.join(args.output_dir, args.model_type + "_prediction.jsonl"), pred_ids=result["pred_label_ids_test_"], label_ids=result["out_label_ids_test_"], preds=result["preds_test_"])
             results.update(result)
 
     return results
