@@ -233,21 +233,26 @@ def evaluate(args, model, tokenizer, prefix=""):
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
+        pred_logits = preds
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
         elif args.output_mode == "regression":
             preds = np.squeeze(preds)
         result = compute_metrics(eval_task, preds, out_label_ids)
-        result['preds'] = preds.tolist()
-        result['labels'] = out_label_ids.tolist()
-        results.update(result)
-
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(prefix))
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+        result['precision'] = result['precision'].tolist()
+        result['recall'] = result['recall'].tolist()
+        result['f1'] = result['f1'].tolist()
+        result['true_sum'] = result['true_sum'].tolist()
+        result['logits'] = pred_logits.tolist()
+        result['preds'] = preds.tolist()
+        result['labels'] = out_label_ids.tolist()
+        results.update(result)
         with open(os.path.join(eval_output_dir, "eval_results.json"), 'w', encoding='utf-8') as fout:
             import json
             json.dump(results, fout)
