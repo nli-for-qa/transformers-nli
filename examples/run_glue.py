@@ -238,6 +238,8 @@ def evaluate(args, model, tokenizer, prefix=""):
         elif args.output_mode == "regression":
             preds = np.squeeze(preds)
         result = compute_metrics(eval_task, preds, out_label_ids)
+        result['preds'] = preds.tolist()
+        result['labels'] = out_label_ids.tolist()
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
@@ -246,7 +248,9 @@ def evaluate(args, model, tokenizer, prefix=""):
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
-
+        with open(os.path.join(eval_output_dir, "eval_results.json"), 'w', encoding='utf-8') as fout:
+            import json
+            json.dump(results, fout)
     return results
 
 
