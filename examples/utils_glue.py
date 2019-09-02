@@ -26,7 +26,7 @@ import sys
 from io import open
 
 from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import matthews_corrcoef, f1_score
+from sklearn.metrics import matthews_corrcoef, f1_score, precision_recall_fscore_support
 
 logger = logging.getLogger(__name__)
 
@@ -580,10 +580,22 @@ def simple_accuracy(preds, labels):
 def acc_and_f1(preds, labels):
     acc = simple_accuracy(preds, labels)
     f1 = f1_score(y_true=labels, y_pred=preds)
+
     return {
         "acc": acc,
         "f1": f1,
         "acc_and_f1": (acc + f1) / 2,
+    }
+
+def pre_recall_f1(preds, labels):
+    precision, recall, f1, true_sum = precision_recall_fscore_support(y_true=labels, y_pred=preds)
+    acc = simple_accuracy(preds, labels)
+    return {
+        'acc': acc,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'true_sum': true_sum,
     }
 
 
@@ -620,7 +632,7 @@ def compute_metrics(task_name, preds, labels):
     elif task_name == "wnli":
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == 'squad_sent':
-        return acc_and_f1(preds, labels)
+        return pre_recall_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
