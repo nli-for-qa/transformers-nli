@@ -18,7 +18,9 @@
 from __future__ import absolute_import, division, print_function
 
 import csv
+import json
 import logging
+import tqdm
 import os
 import sys
 from io import open
@@ -85,6 +87,14 @@ class DataProcessor(object):
                 if sys.version_info[0] == 2:
                     line = list(unicode(cell, 'utf-8') for cell in line)
                 lines.append(line)
+            return lines
+
+    @classmethod
+    def _read_json(cls, input_file):
+        with open(input_file, 'r', encoding='utf-8') as fin:
+            lines = []
+            for line in fin.readlines():
+                lines.append(json.loads(line.strip('\n')))
             return lines
 
 
@@ -387,6 +397,40 @@ class WnliProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+class SquadSentProcessor(DataProcessor):
+    """Processor for the QQP data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_json(os.path.join(data_dir, "dev.json.sent")), "dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+
+        for (i, line) in tqdm.tqdm(enumerate(lines)):
+            guid = "%s-%s" % (set_type, line['id'])
+            try:
+                text_a = line['question']
+                text_b = line['sentence']
+                label = line['label']
+            except IndexError:
+                continue
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
                                  tokenizer, output_mode,
@@ -411,7 +455,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     label_map = {label : i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in enumerate(examples):
+    for (ex_index, example) in tqdm.tqdm(enumerate(examples)):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
@@ -575,6 +619,8 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "wnli":
         return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == 'squad_sent':
+        return acc_and_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
@@ -589,6 +635,7 @@ processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
+    'squad_sent': SquadSentProcessor,
 }
 
 output_modes = {
@@ -602,6 +649,7 @@ output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
+    'squad_sent': 'classification',
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -614,4 +662,5 @@ GLUE_TASKS_NUM_LABELS = {
     "qnli": 2,
     "rte": 2,
     "wnli": 2,
+    'squad_sent': 2,
 }
