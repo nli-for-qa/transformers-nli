@@ -276,7 +276,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, "is_test_" + str(test) + "_eval_results.txt")
-
+        print('write eval results to: ', output_eval_file)
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(str(prefix) + " is test:" + str(test)))
             writer.write("model           =%s\n" % str(args.model_name_or_path))
@@ -287,7 +287,8 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer.write("max seq length  =%d\n" % args.max_seq_length)
             writer.write("predict results of json format:\n")
             writer.write(json.dumps(preds_label.tolist(), ensure_ascii=False) + "\n")
-            writer.write(json.dumps(out_label_ids.tolist(), ensure_ascii=False))
+            writer.write(json.dumps(out_label_ids.tolist(), ensure_ascii=False) + "\n")
+            writer.write(json.dumps(preds.tolist(), ensure_ascii=False) + '\n')
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
