@@ -254,13 +254,13 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
-        preds = np.argmax(preds, axis=1)
-        acc = simple_accuracy(preds, out_label_ids)
+        preds_label = np.argmax(preds, axis=1)
+        acc = simple_accuracy(preds_label, out_label_ids)
         result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
 
-        output_eval_file = os.path.join(eval_output_dir, "is_test_" + str(test).lower() + "_eval_results.txt")
-
+        output_eval_file = os.path.join(eval_output_dir, "is_test_" + str(test) + "_eval_results.txt")
+        print('write eval results to: ', output_eval_file)
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(str(prefix) + " is test:" + str(test)))
             writer.write("model           =%s\n" % str(args.model_name_or_path))
@@ -269,6 +269,10 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer.write("train num epochs=%d\n" % args.num_train_epochs)
             writer.write("fp16            =%s\n" % args.fp16)
             writer.write("max seq length  =%d\n" % args.max_seq_length)
+            writer.write("predict results of json format:\n")
+            writer.write(json.dumps(preds_label.tolist(), ensure_ascii=False) + "\n")
+            writer.write(json.dumps(out_label_ids.tolist(), ensure_ascii=False) + "\n")
+            writer.write(json.dumps(preds.tolist(), ensure_ascii=False) + '\n')
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
