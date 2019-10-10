@@ -26,7 +26,7 @@ from io import open
 from tqdm import tqdm
 from transformers.tokenization_bert import BasicTokenizer, whitespace_tokenize
 from multiprocessing import cpu_count
-
+import re
 Thread_num = cpu_count()
 import multiprocessing
 from multiprocessing import Pool
@@ -35,9 +35,9 @@ import random
 
 # Required by XLNet evaluation method to compute optimal threshold (see write_predictions_extended() method)
 from utils_squad_evaluate import find_all_best_thresh_v2, make_qid_to_has_ans, get_raw_scores
+from collections import Counter
 
 logger = logging.getLogger(__name__)
-
 from allennlp.predictors.predictor import Predictor
 predictor_srl = Predictor.from_path(
     "https://s3-us-west-2.amazonaws.com/allennlp/models/bert-base-srl-2019.06.17.tar.gz", cuda_device=0)
@@ -118,6 +118,111 @@ class InputFeatures(object):
         self.end_position = end_position
         self.is_impossible = is_impossible
 
+class SrlVocabEntry(object):
+    """ SRL Vocabulary Entry, i.e. structure containing SRL labels.
+    """
+    def __init__(self, word2id=None):
+        """ Init VocabEntry Instance.
+        @param word2id (dict): dictionary mapping words 2 indices
+        """
+        if word2id:
+            self.word2id = word2id
+        else:
+            self.word2id = dict()
+            self.word2id['<pad>'] = 0   # Pad Token
+        self.padid = self.word2id['<pad>']
+        self.id2word = {v: k for k, v in self.word2id.items()}
+
+    def __getitem__(self, word):
+        """ Retrieve word's index. Return the index for the unk
+        token if the word is out of vocabulary.
+        @param word (str): word to look up.
+        @returns index (int): index of word
+        """
+        return self.word2id.get(word, self.unk_id)
+
+    def __contains__(self, word):
+        """ Check if word is captured by VocabEntry.
+        @param word (str): word to look up
+        @returns contains (bool): whether word is contained
+        """
+        return word in self.word2id
+
+    def __setitem__(self, key, value):
+        """ Raise error, if one tries to edit the VocabEntry.
+        """
+        raise ValueError('vocabulary is readonly')
+
+    def __len__(self):
+        """ Compute number of words in VocabEntry.
+        @returns len (int): number of words in VocabEntry
+        """
+        return len(self.word2id)
+
+    def __repr__(self):
+        """ Representation of VocabEntry to be used
+        when printing the object.
+        """
+        return 'Vocabulary[size=%d]' % len(self)
+
+    def id2word(self, wid):
+        """ Return mapping of index to word.
+        @param wid (int): word index
+        @returns word (str): word corresponding to index
+        """
+        return self.id2word[wid]
+
+    def add(self, word):
+        """ Add word to VocabEntry, if it is previously unseen.
+        @param word (str): word to add to VocabEntry
+        @return index (int): index that the word has been assigned
+        """
+        if word not in self:
+            wid = self.word2id[word] = len(self)
+            self.id2word[wid] = word
+            return wid
+        else:
+            return self[word]
+
+    def words2indices(self, sents):
+        """ Convert list of words or list of sentences of words
+        into list or list of list of indices.
+        @param sents (list[str] or list[list[str]]): sentence(s) in words
+        @return word_ids (list[int] or list[list[int]]): sentence(s) in indices
+        """
+        if type(sents[0]) == list:
+            return [[self[w] for w in s] for s in sents]
+        else:
+            return [self[w] for w in sents]
+
+    def indices2words(self, word_ids):
+        """ Convert list of indices into words.
+        @param word_ids (list[int]): list of word ids
+        @return sents (list[str]): list of words
+        """
+        return [self.id2word[w_id] for w_id in word_ids]
+
+    @staticmethod
+    def from_corpus(corpus_file, size=200, freq_cutoff=0):
+        """ Given a corpus construct a Vocab Entry.
+        @param corpus file: file of srl labels
+        @param size (int): # of words in vocabulary
+        @param freq_cutoff (int): if word occurs n < freq_cutoff times, drop the word
+        @returns vocab_entry (VocabEntry): VocabEntry instance produced from provided corpus
+        """
+        vocab_entry = SrlVocabEntry()
+        words = []
+        with open(corpus_file, 'r', encoding='utf-8') as fin:
+            words = [word.strip() for word in fin.readlines()]
+        word_freq = Counter(words)
+        valid_words = [w for w, v in word_freq.items() if v >= freq_cutoff]
+        print('number of word types: {}, number of word types w/ frequency >= {}: {}'
+              .format(len(word_freq), freq_cutoff, len(valid_words)))
+        top_k_words = sorted(valid_words, key=lambda w: word_freq[w], reverse=True)[:size]
+        for word in top_k_words:
+            vocab_entry.add(word)
+        return vocab_entry
+
 def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=False):
     paragraph_examples = []
     def is_whitespace(c):
@@ -144,7 +249,7 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
         question_text = qa["question"]
         qa_tokens = []
         prev_is_whitespace = True
-        for c in paragraph_text:
+        for c in question_text:
             if is_whitespace(c):
                 prev_is_whitespace = True
             else:
@@ -214,6 +319,19 @@ def read_squad_examples(input_file, is_training, version_2_with_negative):
     examples = [example for entry_examples in examples for example in entry_examples]
     return examples
 
+def convert2srl(para):
+    sent_ends = [m.start() for m in re.finditer(r'[\.!?]', para)]
+    if not sent_ends:
+        sent_ends = [len(para) - 1]
+    sent_ends = list(map(lambda x: x + 1, sent_ends))
+    sent_starts = [0] + sent_ends
+    sent_spans = list(zip(sent_starts, sent_ends))
+    sentences = [{'sentence': para[span[0]:span[1]], 'sent_span': span} for span in sent_spans]
+    sentences_srl = predictor_srl.predict_batch_json(sentences)
+    for sent_index, sent_srl in enumerate(zip(sentences, sentences_srl)):
+        sentences[sent_index].update(sent_srl[1])
+    return sentences
+
 def convert_examples_to_features(examples, max_seq_length,
                                  tokenizer,
                                  doc_stride, max_query_length, is_training,
@@ -230,7 +348,8 @@ def convert_examples_to_features(examples, max_seq_length,
                                  mask_padding_with_zero=True,
                                  add_prefix_space=False,
                                  negtive_sample_probability=1.0,
-                                 model_type='bert'):
+                                 model_type='bert',
+                                 srl_label_vocab=None):
     """Loads a data file into a list of `InputBatch`s."""
 
     unique_id = 1000000000
@@ -247,8 +366,28 @@ def convert_examples_to_features(examples, max_seq_length,
             query_tokens = tokenizer.tokenize(example.question_text, add_prefix_space=add_prefix_space)
         else:
             query_tokens = tokenizer.tokenize(example.question_text)
+        ##todo other models' srl beyond bert
+        question_text = example.question_text
+
+        question_text_srls = convert2srl(question_text)
+        question_verbs = [len(srl['verbs']) for srl in question_text_srls]
+        question_verbs_sum =sum(question_verbs)
+        assert len(question_text_srls) >= 1
+        if question_verbs_sum:
+            question_wordpieces_labels = [[wp, wpl] for srl in question_text_srls for wp, wpl in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
+            if len(question_wordpieces_labels) != len(query_tokens):
+                print('wordpieces is not equal!')
+                print(question_wordpieces_labels)
+                print(query_tokens)
+            assert len(question_wordpieces_labels) == len(query_tokens)
+            srl_labels = [srl[1] for srl in question_wordpieces_labels]
+            assert srl_label_vocab is not None
+            question_srl_ids = [srl_label_vocab[srl] for srl in srl_labels]
+        else:
+            question_srl_ids = [srl_label_vocab.padid for wp in question_wordpieces_labels]
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]
+            question_srl_ids = question_srl_ids[0:max_query_length]
 
         tok_to_orig_index = []
         orig_to_tok_index = []
