@@ -46,7 +46,7 @@ from transformers import AdamW, WarmupLinearSchedule
 
 from utils_squad_srl import (read_squad_examples, convert_examples_to_features,
                          RawResult, write_predictions,
-                         RawResultExtended, write_predictions_extended)
+                         RawResultExtended, write_predictions_extended, SrlVocabEntry)
 
 # The follwing import is the official SQuAD evaluation script (2.0).
 # You can remove it from the dependencies if you are using this script outside of the library
@@ -200,8 +200,8 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix=""):
-    dataset, examples, features = load_and_cache_examples(args, tokenizer, evaluate=True, output_examples=True)
+def evaluate(args, model, tokenizer, prefix="", srl_label_vocab=None):
+    dataset, examples, features = load_and_cache_examples(args, tokenizer, evaluate=True, output_examples=True, srl_label_vocab=srl_label_vocab)
 
     if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(args.output_dir)
@@ -276,7 +276,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     return results
 
 
-def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False):
+def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False, srl_label_vocab=None):
     if args.local_rank not in [-1, 0] and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
@@ -311,6 +311,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                                                 add_prefix_space=True if args.model_type == 'roberta' else False,
                                                 negtive_sample_probability=args.nsp,
                                                 model_type=args.model_type,
+                                                srl_label_vocab=srl_label_vocab,
                                                 )
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
@@ -440,6 +441,7 @@ def main():
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--nsp', type=float, default=1.0, help='negtive examples sample probability')
+    parser.add_argument('--srl_label_file', default='', help='srl labels file')
     args = parser.parse_args()
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
@@ -490,10 +492,12 @@ def main():
     model.to(args.device)
 
     logger.info("Training/evaluation parameters %s", args)
-
+    srl_label_vocab = None
+    if args.srl_labels_file:
+        srl_label_vocab = SrlVocabEntry.from_corpus(args.srl_labels_file)
     # Training
     if args.do_train:
-        train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
+        train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False, srl_label_vocab=srl_label_vocab)
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
@@ -537,7 +541,7 @@ def main():
             model.to(args.device)
 
             # Evaluate
-            result = evaluate(args, model, tokenizer, prefix=global_step)
+            result = evaluate(args, model, tokenizer, prefix=global_step, srl_label_vocab=srl_label_vocab)
 
             result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
             results.update(result)
