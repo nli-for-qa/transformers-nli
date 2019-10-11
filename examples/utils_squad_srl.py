@@ -41,8 +41,9 @@ logger = logging.getLogger(__name__)
 from allennlp.predictors.predictor import Predictor
 predictor_srl = Predictor.from_path(
     "https://s3-us-west-2.amazonaws.com/allennlp/models/bert-base-srl-2019.06.17.tar.gz", cuda_device=0)
-
-
+import spacy
+spacy_nlp = spacy.load('en_core_web_sm', pos_tags=False, parse=False, ner=False)
+import re
 class SquadExample(object):
     """
     A single training/test example for the Squad dataset.
@@ -101,7 +102,8 @@ class InputFeatures(object):
                  paragraph_len,
                  start_position=None,
                  end_position=None,
-                 is_impossible=None):
+                 is_impossible=None,
+                 srl_ids=None):
         self.unique_id = unique_id
         self.example_index = example_index
         self.doc_span_index = doc_span_index
@@ -117,6 +119,7 @@ class InputFeatures(object):
         self.start_position = start_position
         self.end_position = end_position
         self.is_impossible = is_impossible
+        self.srl_ids = srl_ids
 
 class SrlVocabEntry(object):
     """ SRL Vocabulary Entry, i.e. structure containing SRL labels.
@@ -223,6 +226,11 @@ class SrlVocabEntry(object):
             vocab_entry.add(word)
         return vocab_entry
 
+def clean_text(text):
+    """normalize spaces in a string."""
+    text = re.sub(r'\s', ' ', text)
+    return text
+
 def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=False):
     paragraph_examples = []
     def is_whitespace(c):
@@ -230,36 +238,41 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
             return True
         return False
 
-    paragraph_text = paragraph["context"]
-    doc_tokens = []
+    paragraph_text = clean_text(paragraph["context"])
+    doc_spacy = spacy_nlp(paragraph_text)
+    doc_tokens = [w.text for w in doc_spacy if not w.is_space]
+    doc_token_spans = [(w.idx, w.idx + len(w.text)) for w in doc_spacy if not w.is_space]
     char_to_word_offset = []
+    start = 0
+    assert len(doc_token_spans) >= 1
+    for token_index, token_span in enumerate(doc_token_spans[1:]):
+        for _ in range(start, token_span[0]):
+            char_to_word_offset.append(token_index)
+        start = token_span[0]
+    for _ in range(start, len(paragraph_text)):
+        char_to_word_offset.append(len(doc_tokens) - 1)
+    assert len(char_to_word_offset) == len(paragraph_text)
+
+    doc_tokens_original = []
+    char_to_word_offset_original = []
     prev_is_whitespace = True
     for c in paragraph_text:
         if is_whitespace(c):
             prev_is_whitespace = True
         else:
             if prev_is_whitespace:
-                doc_tokens.append(c)
+                doc_tokens_original.append(c)
             else:
-                doc_tokens[-1] += c
+                doc_tokens_original[-1] += c
             prev_is_whitespace = False
-        char_to_word_offset.append(len(doc_tokens) - 1)
+        char_to_word_offset_original.append(len(doc_tokens_original) - 1)
     for qa in paragraph["qas"]:
         qas_id = qa["id"]
         question_text = qa["question"]
-        qa_tokens = []
-        prev_is_whitespace = True
-        for c in question_text:
-            if is_whitespace(c):
-                prev_is_whitespace = True
-            else:
-                if prev_is_whitespace:
-                    qa_tokens.append(c)
-                else:
-                    qa_tokens[-1] += c
-                prev_is_whitespace = False
-        question_text = " ".join(qa_tokens)
-
+        question_text = clean_text(question_text)
+        question_spacy = spacy_nlp(question_text)
+        question_tokens = [w.text for w in question_spacy if not w.is_space]
+        question_text = " ".join(question_tokens)
         start_position = None
         end_position = None
         orig_answer_text = None
@@ -283,8 +296,10 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
                 #
                 # Note that this means for training mode, every example is NOT
                 # guaranteed to be preserved.
-                actual_text = " ".join(doc_tokens[start_position:(end_position + 1)])
-                cleaned_answer_text = " ".join(
+                actual_text = "".join(doc_tokens[start_position:(end_position + 1)])
+                orig_answer_text = clean_text(orig_answer_text)
+                orig_answer_text = "".join([w.text for w in spacy_nlp(orig_answer_text)])
+                cleaned_answer_text = "".join(
                     whitespace_tokenize(orig_answer_text))
                 if actual_text.find(cleaned_answer_text) == -1:
                     logger.warning("Could not find answer: '%s' vs. '%s'",
@@ -312,9 +327,11 @@ def read_squad_examples(input_file, is_training, version_2_with_negative):
         input_data = json.load(reader)["data"]
     paragraphs = [paragraph for entry in input_data for paragraph in entry['paragraphs']]
     examples = []
+    # for paragraph in tqdm(paragraphs, desc='paragraphs', total=len(paragraphs)):
+    #     examples.extend(paragraphs2examples(paragraph, is_training=is_training, version_2_with_negative=version_2_with_negative))
     with Pool(Thread_num) as p:
         annotate = partial(paragraphs2examples, is_training=is_training, version_2_with_negative=version_2_with_negative)
-        examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
+        examples = list(tqdm(p.imap(annotate, paragraphs[:10], chunksize=64), total=len(paragraphs),
                                      desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
     examples = [example for entry_examples in examples for example in entry_examples]
     return examples
@@ -324,12 +341,15 @@ def convert2srl(para):
     if not sent_ends:
         sent_ends = [len(para) - 1]
     sent_ends = list(map(lambda x: x + 1, sent_ends))
+    if sent_ends[-1] != len(para):
+        sent_ends.append(len(para))
     sent_starts = [0] + sent_ends
     sent_spans = list(zip(sent_starts, sent_ends))
     sentences = [{'sentence': para[span[0]:span[1]], 'sent_span': span} for span in sent_spans]
     sentences_srl = predictor_srl.predict_batch_json(sentences)
-    for sent_index, sent_srl in enumerate(zip(sentences, sentences_srl)):
-        sentences[sent_index].update(sent_srl[1])
+    for sent_index, sent_srl in enumerate(sentences_srl):
+        sentences[sent_index].update(sent_srl)
+        sentences[sent_index]['wordpiece_tags'] =sent_srl['verbs'][0]['wordpiece_tags'] if sent_srl['verbs'] else ["O" for _ in sent_srl['wordpieces']]
     return sentences
 
 def convert_examples_to_features(examples, max_seq_length,
@@ -358,7 +378,7 @@ def convert_examples_to_features(examples, max_seq_length,
     # f = np.zeros((max_N, max_M), dtype=np.float32)
 
     features = []
-    for (example_index, example) in enumerate(examples):
+    for (example_index, example) in tqdm(enumerate(examples)):
 
         # if example_index % 100 == 0:
         #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
@@ -369,25 +389,27 @@ def convert_examples_to_features(examples, max_seq_length,
         ##todo other models' srl beyond bert
         question_text = example.question_text
 
-        question_text_srls = convert2srl(question_text)
-        question_verbs = [len(srl['verbs']) for srl in question_text_srls]
+        question_srls = convert2srl(question_text)
+        question_verbs = [len(srl['verbs']) for srl in question_srls]
         question_verbs_sum =sum(question_verbs)
-        assert len(question_text_srls) >= 1
-        if question_verbs_sum:
-            question_wordpieces_labels = [[wp, wpl] for srl in question_text_srls for wp, wpl in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
+        assert len(question_srls) >= 1
+        if question_verbs_sum and srl_label_vocab:
+            question_wordpieces_labels = [[wp, wpl] for srl in question_srls for wp, wpl in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
             if len(question_wordpieces_labels) != len(query_tokens):
+                question_srls = convert2srl(question_text)
                 print('wordpieces is not equal!')
                 print(question_wordpieces_labels)
                 print(query_tokens)
             assert len(question_wordpieces_labels) == len(query_tokens)
-            srl_labels = [srl[1] for srl in question_wordpieces_labels]
-            assert srl_label_vocab is not None
-            question_srl_ids = [srl_label_vocab[srl] for srl in srl_labels]
+            srl_question_labels = [srl[1] for srl in question_wordpieces_labels]
+            srl_question_wordpieces = [srl[0] for srl in question_wordpieces_labels]
         else:
-            question_srl_ids = [srl_label_vocab.padid for wp in question_wordpieces_labels]
+            srl_question_labels = ['O' for _ in query_tokens]
+            srl_question_wordpieces = query_tokens
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]
-            question_srl_ids = question_srl_ids[0:max_query_length]
+            srl_question_labels = srl_question_labels[0:max_query_length]
+            srl_question_wordpieces = srl_question_wordpieces[0:max_query_length]
 
         tok_to_orig_index = []
         orig_to_tok_index = []
@@ -403,6 +425,26 @@ def convert_examples_to_features(examples, max_seq_length,
                 tok_to_orig_index.append(i)
                 all_doc_tokens.append(sub_token)
 
+        doc_text = " ".join(example.doc_tokens)
+        doc_srls = convert2srl(doc_text)
+        doc_verbs = [len(srl['verbs']) for srl in doc_srls]
+        doc_verbs_sum = sum(doc_verbs)
+        assert len(doc_srls) >= 1
+        if doc_verbs_sum and srl_label_vocab:
+            try:
+                doc_wordpieces_labels =  [[wp, wpl] for srl in doc_srls for wp, wpl in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
+                srl_doc_labels = [srl[1] for srl in doc_wordpieces_labels]
+                srl_doc_wordpieces = [srl[0] for srl in doc_wordpieces_labels]
+                assert len(srl_doc_wordpieces) == len(all_doc_tokens)
+            except:
+                srl_doc_labels = ['O' for _ in all_doc_tokens]
+                srl_doc_wordpieces = all_doc_tokens
+        else:
+            srl_doc_labels = ['O' for _ in all_doc_tokens]
+            srl_doc_wordpieces = all_doc_tokens
+        is_all_doc_token_equal = [ts[0] != ts[1] for ts in zip(all_doc_tokens, srl_doc_wordpieces)]
+        is_all_doc_token_equal = sum(is_all_doc_token_equal)
+        assert is_all_doc_token_equal == 0
         tok_start_position = None
         tok_end_position = None
         if is_training and example.is_impossible:
@@ -443,6 +485,7 @@ def convert_examples_to_features(examples, max_seq_length,
         example_features = []
         for (doc_span_index, doc_span) in enumerate(doc_spans):
             tokens = []
+            srl_tokens = []
             token_to_orig_map = {}
             token_is_max_context = {}
             segment_ids = []
@@ -454,13 +497,17 @@ def convert_examples_to_features(examples, max_seq_length,
             # CLS token at the beginning
             if not cls_token_at_end:
                 tokens.append(cls_token)
+                srl_tokens.append('O')
                 segment_ids.append(cls_token_segment_id)
                 p_mask.append(0)
                 cls_index = 0
 
             # Query
-            for token in query_tokens:
+            for token_srl in zip(query_tokens, srl_question_wordpieces, srl_question_labels):
+                token, srl_wordpiece, srl_label = token_srl
+                assert token == srl_wordpiece
                 tokens.append(token)
+                srl_tokens.append(srl_label)
                 segment_ids.append(sequence_a_segment_id)
                 p_mask.append(1)
 
@@ -468,10 +515,12 @@ def convert_examples_to_features(examples, max_seq_length,
             if sep_token_extra:
                 # roberta uses an extra separator b/w pairs of sentences
                 tokens += [sep_token]
+                srl_tokens.append('O')
                 segment_ids.append(sequence_a_segment_id)
                 p_mask.append(1)
 
             tokens.append(sep_token)
+            srl_tokens.append('O')
             segment_ids.append(sequence_a_segment_id)
             p_mask.append(1)
 
@@ -484,24 +533,29 @@ def convert_examples_to_features(examples, max_seq_length,
                                                        split_token_index)
                 token_is_max_context[len(tokens)] = is_max_context
                 tokens.append(all_doc_tokens[split_token_index])
+                assert all_doc_tokens[split_token_index] == srl_doc_wordpieces[split_token_index]
+                srl_tokens.append(srl_doc_labels[split_token_index])
                 segment_ids.append(sequence_b_segment_id)
                 p_mask.append(0)
             paragraph_len = doc_span.length
 
             # SEP token
             tokens.append(sep_token)
+            srl_tokens.append('O')
             segment_ids.append(sequence_b_segment_id)
             p_mask.append(1)
 
             # CLS token at the end
             if cls_token_at_end:
                 tokens.append(cls_token)
+                srl_tokens.append('O')
                 segment_ids.append(cls_token_segment_id)
                 p_mask.append(0)
                 cls_index = len(tokens) - 1  # Index of classification token
 
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
+            srl_ids = [srl_label_vocab.word2id.get(srl) for srl in srl_tokens]
+            assert len(input_ids) == len(srl_ids)
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
             input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
@@ -510,11 +564,15 @@ def convert_examples_to_features(examples, max_seq_length,
             padding_length = max_seq_length - len(input_ids)
             if pad_on_left:
                 input_ids = ([pad_token] * padding_length) + input_ids
+                srl_ids = ([0] * padding_length) + srl_ids
+                srl_ids1 = ([0] * padding_length) + srl_ids
                 input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
                 segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
                 p_mask = ([1] * padding_length) + p_mask
             else:
                 input_ids = input_ids + ([pad_token] * padding_length)
+                srl_ids1 = srl_ids + ([0] * padding_length)
+                srl_ids = srl_ids + ([0] * padding_length)
                 input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
                 segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
                 p_mask = p_mask + ([1] * padding_length)
@@ -524,7 +582,7 @@ def convert_examples_to_features(examples, max_seq_length,
             #     input_mask.append(0 if mask_padding_with_zero else 1)
             #     segment_ids.append(pad_token_segment_id)
             #     p_mask.append(1)
-
+            assert len(input_ids) == len(srl_ids1)
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
@@ -573,290 +631,11 @@ def convert_examples_to_features(examples, max_seq_length,
                     paragraph_len=paragraph_len,
                     start_position=start_position,
                     end_position=end_position,
-                    is_impossible=span_is_impossible))
+                    is_impossible=span_is_impossible,
+                    srl_ids=srl_ids1))
             unique_id += 1
 
     return features
-
-
-def example_to_feature(example, max_seq_length=384,
-                                 tokenizer=None,
-                                 doc_stride=128, max_query_length=100, is_training=False,
-                                 cls_token_at_end=False,
-                                 cls_token='[CLS]',
-                                 cls_token_segment_id=0,
-                                 sep_token='[SEP]',
-                                 sep_token_extra=False,
-                                 pad_on_left=False,
-                                 pad_token=0,
-                                 pad_token_segment_id=0,
-                                 sequence_a_segment_id=0,
-                                 sequence_b_segment_id=1,
-                                 mask_padding_with_zero=True,
-                                 add_prefix_space=False,
-                                 negtive_sample_probability=1.0,
-                                 model_type='bert'):
-    if model_type == 'roberta':
-        query_tokens = tokenizer.tokenize(example.question_text, add_prefix_space=add_prefix_space)
-    else:
-        query_tokens = tokenizer.tokenize(example.question_text)
-    if len(query_tokens) > max_query_length:
-        query_tokens = query_tokens[0:max_query_length]
-
-    tok_to_orig_index = []
-    orig_to_tok_index = []
-    all_doc_tokens = []
-    for (i, token) in enumerate(example.doc_tokens):
-        orig_to_tok_index.append(len(all_doc_tokens))
-        if model_type == 'roberta':
-            sub_tokens = tokenizer.tokenize(token, add_prefix_space=add_prefix_space)
-        else:
-            sub_tokens = tokenizer.tokenize(token)
-        for sub_token in sub_tokens:
-            tok_to_orig_index.append(i)
-            all_doc_tokens.append(sub_token)
-
-    tok_start_position = None
-    tok_end_position = None
-    if is_training and example.is_impossible:
-        tok_start_position = -1
-        tok_end_position = -1
-    if is_training and not example.is_impossible:
-        tok_start_position = orig_to_tok_index[example.start_position]
-        if example.end_position < len(example.doc_tokens) - 1:
-            tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
-        else:
-            tok_end_position = len(all_doc_tokens) - 1
-        (tok_start_position, tok_end_position) = _improve_answer_span(
-            all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
-            example.orig_answer_text, add_prefix_space=add_prefix_space, model_type=model_type)
-
-    # The -3 accounts for [CLS], [SEP] and [SEP]
-    if sep_token_extra:
-        max_tokens_for_doc = max_seq_length - len(query_tokens) - 4
-    else:
-        max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
-
-    # We can have documents that are longer than the maximum sequence length.
-    # To deal with this we do a sliding window approach, where we take chunks
-    # of the up to our max length with a stride of `doc_stride`.
-    _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
-        "DocSpan", ["start", "length"])
-    doc_spans = []
-    start_offset = 0
-    while start_offset < len(all_doc_tokens):
-        length = len(all_doc_tokens) - start_offset
-        if length > max_tokens_for_doc:
-            length = max_tokens_for_doc
-        doc_spans.append(_DocSpan(start=start_offset, length=length))
-        if start_offset + length == len(all_doc_tokens):
-            break
-        start_offset += min(length, doc_stride)
-
-    example_features = []
-    for (doc_span_index, doc_span) in enumerate(doc_spans):
-        tokens = []
-        token_to_orig_map = {}
-        token_is_max_context = {}
-        segment_ids = []
-
-        # p_mask: mask with 1 for token than cannot be in the answer (0 for token which can be in an answer)
-        # Original TF implem also keep the classification token (set to 0) (not sure why...)
-        p_mask = []
-
-        # CLS token at the beginning
-        if not cls_token_at_end:
-            tokens.append(cls_token)
-            segment_ids.append(cls_token_segment_id)
-            p_mask.append(0)
-            cls_index = 0
-
-        # Query
-        for token in query_tokens:
-            tokens.append(token)
-            segment_ids.append(sequence_a_segment_id)
-            p_mask.append(1)
-
-        # SEP token
-        if sep_token_extra:
-            # roberta uses an extra separator b/w pairs of sentences
-            tokens += [sep_token]
-            segment_ids.append(sequence_a_segment_id)
-            p_mask.append(1)
-
-        tokens.append(sep_token)
-        segment_ids.append(sequence_a_segment_id)
-        p_mask.append(1)
-
-        # Paragraph
-        for i in range(doc_span.length):
-            split_token_index = doc_span.start + i
-            token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
-
-            is_max_context = _check_is_max_context(doc_spans, doc_span_index,
-                                                   split_token_index)
-            token_is_max_context[len(tokens)] = is_max_context
-            tokens.append(all_doc_tokens[split_token_index])
-            segment_ids.append(sequence_b_segment_id)
-            p_mask.append(0)
-        paragraph_len = doc_span.length
-
-        # SEP token
-        tokens.append(sep_token)
-        segment_ids.append(sequence_b_segment_id)
-        p_mask.append(1)
-
-        # CLS token at the end
-        if cls_token_at_end:
-            tokens.append(cls_token)
-            segment_ids.append(cls_token_segment_id)
-            p_mask.append(0)
-            cls_index = len(tokens) - 1  # Index of classification token
-
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-        # The mask has 1 for real tokens and 0 for padding tokens. Only real
-        # tokens are attended to.
-        input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
-
-        # Zero-pad up to the sequence length.
-        padding_length = max_seq_length - len(input_ids)
-        if pad_on_left:
-            input_ids = ([pad_token] * padding_length) + input_ids
-            input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
-            segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
-            p_mask = ([1] * padding_length) + p_mask
-        else:
-            input_ids = input_ids + ([pad_token] * padding_length)
-            input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
-            segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
-            p_mask = p_mask + ([1] * padding_length)
-
-        # while len(input_ids) < max_seq_length:
-        #     input_ids.append(pad_token)
-        #     input_mask.append(0 if mask_padding_with_zero else 1)
-        #     segment_ids.append(pad_token_segment_id)
-        #     p_mask.append(1)
-
-        assert len(input_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-        assert len(segment_ids) == max_seq_length
-
-        span_is_impossible = example.is_impossible
-        start_position = None
-        end_position = None
-        if is_training and not span_is_impossible:
-            # For training, if our document chunk does not contain an annotation
-            # we throw it out, since there is nothing to predict.
-            doc_start = doc_span.start
-            doc_end = doc_span.start + doc_span.length - 1
-            out_of_span = False
-            if not (tok_start_position >= doc_start and
-                    tok_end_position <= doc_end):
-                out_of_span = True
-            if out_of_span:
-                start_position = 0
-                end_position = 0
-                span_is_impossible = True
-            else:
-                if not sep_token_extra:
-                    doc_offset = len(query_tokens) + 2
-                else:
-                    doc_offset = len(query_tokens) + 3
-                start_position = tok_start_position - doc_start + doc_offset
-                end_position = tok_end_position - doc_start + doc_offset
-
-        if is_training and span_is_impossible:
-            start_position = cls_index
-            end_position = cls_index
-        example_features.append(
-            InputFeatures(
-                unique_id=0,
-                example_index=0,
-                doc_span_index=doc_span_index,
-                tokens=tokens,
-                token_to_orig_map=token_to_orig_map,
-                token_is_max_context=token_is_max_context,
-                input_ids=input_ids,
-                input_mask=input_mask,
-                segment_ids=segment_ids,
-                cls_index=cls_index,
-                p_mask=p_mask,
-                paragraph_len=paragraph_len,
-                start_position=start_position,
-                end_position=end_position,
-                is_impossible=span_is_impossible)
-        )
-    example_features_selected = []
-    for example_feature in example_features:
-        if is_training and example_feature.is_impossible and random.random() > negtive_sample_probability:
-            continue
-        example_features_selected.append(example_feature)
-    if not example_features_selected and example_features:
-        example_features_selected = [example_features[0]]
-    return example_features_selected
-
-def convert_examples_to_features1(examples, max_seq_length,
-                                 tokenizer,
-                                 doc_stride, max_query_length, is_training,
-                                 cls_token_at_end=False,
-                                 cls_token='[CLS]',
-                                 cls_token_segment_id=0,
-                                 sep_token='[SEP]',
-                                 sep_token_extra=False,
-                                 pad_on_left=False,
-                                 pad_token=0,
-                                 pad_token_segment_id=0,
-                                 sequence_a_segment_id=0,
-                                 sequence_b_segment_id=1,
-                                 mask_padding_with_zero=True,
-                                 add_prefix_space=False,
-                                 negtive_sample_probability=1.0,
-                                 model_type='bert'):
-    logger.info('Multiprocessing!')
-    unique_id = 1000000000
-    features_initial = []
-    with Pool(Thread_num) as p:
-        annotate = partial(example_to_feature, max_seq_length=max_seq_length,
-                                 tokenizer=tokenizer,
-                                 doc_stride=doc_stride, max_query_length=max_query_length, is_training=is_training,
-                                 cls_token_at_end=cls_token_at_end,
-                                 cls_token=cls_token,
-                                 cls_token_segment_id=cls_token_segment_id,
-                                 sep_token=sep_token,
-                                 sep_token_extra=sep_token_extra,
-                                 pad_on_left=pad_on_left,
-                                 pad_token=pad_token,
-                                 pad_token_segment_id=pad_token_segment_id,
-                                 sequence_a_segment_id=sequence_a_segment_id,
-                                 sequence_b_segment_id=sequence_b_segment_id,
-                                 mask_padding_with_zero=mask_padding_with_zero,
-                                 add_prefix_space=add_prefix_space,
-                                 negtive_sample_probability=negtive_sample_probability,
-                                 model_type=model_type)
-        example_chunks = [examples[start:start+50000] for start in range(0, len(examples), 50000)]
-        logger.info('total chunks: {}'.format(len(example_chunks)))
-        for chunk_id, examples_part in enumerate(example_chunks):
-            features_partial = list(tqdm(p.imap(annotate, examples_part, chunksize=64), total=len(examples_part), desc='is_training_' + str(is_training).lower() + '_convert_features'))
-            features_initial.extend(features_partial)
-            logger.info('processing chunk {}'.format(chunk_id))
-    features = []
-    drop_negative_num = 0
-    for example_index, example_features in tqdm(enumerate(features_initial), desc='post processing fetures'):
-        if not example_features:
-            logger.info('Attention: meet wrong example!')
-        for feature in example_features:
-            # if feature.is_impossible:
-            #     if is_training and random.random() > negtive_sample_probability:
-            #         drop_negative_num += 1
-            #         continue
-            feature.unique_id = unique_id
-            unique_id += 1
-            feature.example_index = example_index
-            features.append(feature)
-    logger.info('Is training: {} features num: {}, drop negative num: {}'.format(str(is_training), len(features), drop_negative_num))
-    return features
-
 
 def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
                          orig_answer_text, add_prefix_space=False, model_type='bert'):

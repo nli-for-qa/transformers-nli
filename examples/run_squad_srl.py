@@ -33,7 +33,9 @@ from tqdm import tqdm, trange
 from tensorboardX import SummaryWriter
 
 from transformers import (WEIGHTS_NAME, BertConfig,
-                                  BertForQuestionAnswering, BertTokenizer,
+                                  BertForQuestionAnswering,
+                                  BertForQuestionAnsweringSrl,
+                                  BertTokenizer,
                                   XLMConfig, XLMForQuestionAnswering,
                                   XLMTokenizer, XLNetConfig,
                                   XLNetForQuestionAnswering,
@@ -60,6 +62,7 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) \
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForQuestionAnswering, BertTokenizer),
+    'bert-srl': (BertConfig, BertForQuestionAnsweringSrl, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForQuestionAnswering, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForQuestionAnswering, XLMTokenizer),
     'distilbert': (DistilBertConfig, DistilBertForQuestionAnswering, DistilBertTokenizer),
@@ -141,6 +144,8 @@ def train(args, train_dataset, model, tokenizer):
                       'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,
                       'start_positions': batch[3], 
                       'end_positions':   batch[4]}
+            if args.srl_label_file:
+                inputs.update({'srl_ids': batch[7]})
             if args.model_type in ['xlnet', 'xlm']:
                 inputs.update({'cls_index': batch[5],
                                'p_mask':       batch[6]})
@@ -228,6 +233,8 @@ def evaluate(args, model, tokenizer, prefix="", srl_label_vocab=None):
             if args.model_type in ['xlnet', 'xlm']:
                 inputs.update({'cls_index': batch[4],
                                'p_mask':    batch[5]})
+            if args.srl_label_file:
+                inputs.update({'srl_ids': batch[6]})
             outputs = model(**inputs)
 
         for i, example_index in enumerate(example_indices):
@@ -313,6 +320,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                                                 model_type=args.model_type,
                                                 srl_label_vocab=srl_label_vocab,
                                                 )
+
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
             torch.save(features, cached_features_file)
@@ -322,20 +330,30 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
 
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
+    all_srl_ids = torch.tensor([f.srl_ids if f.srl_ids else 0 for f in features], dtype=torch.long)
     all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
     all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
     all_cls_index = torch.tensor([f.cls_index for f in features], dtype=torch.long)
     all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.float)
     if evaluate:
         all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
+        if args.srl_label_file:
+            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
+                                all_example_index, all_cls_index, all_p_mask, all_srl_ids)
+        else:
+            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
                                 all_example_index, all_cls_index, all_p_mask)
     else:
         all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
         all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
-        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-                                all_start_positions, all_end_positions,
-                                all_cls_index, all_p_mask)
+        if args.srl_label_file:
+            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
+                                    all_start_positions, all_end_positions,
+                                    all_cls_index, all_p_mask, all_srl_ids)
+        else:
+            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
+                                    all_start_positions, all_end_positions,
+                                    all_cls_index, all_p_mask)
 
     if output_examples:
         return dataset, examples, features
@@ -444,6 +462,8 @@ def main():
     parser.add_argument('--srl_label_file', default='', help='srl labels file')
     args = parser.parse_args()
 
+    if args.model_type == "bert-srl":
+        assert args.srl_label_file != ''
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
 
@@ -475,7 +495,9 @@ def main():
 
     # Set seed
     set_seed(args)
-
+    srl_label_vocab = None
+    if args.srl_label_file:
+        srl_label_vocab = SrlVocabEntry.from_corpus(args.srl_label_file)
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -484,7 +506,8 @@ def main():
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
-    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
+    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config,
+                                        srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -492,9 +515,6 @@ def main():
     model.to(args.device)
 
     logger.info("Training/evaluation parameters %s", args)
-    srl_label_vocab = None
-    if args.srl_labels_file:
-        srl_label_vocab = SrlVocabEntry.from_corpus(args.srl_labels_file)
     # Training
     if args.do_train:
         train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False, srl_label_vocab=srl_label_vocab)
@@ -519,7 +539,8 @@ def main():
         torch.save(args, os.path.join(args.output_dir, 'training_args.bin'))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        model = model_class.from_pretrained(args.output_dir)
+        model = model_class.from_pretrained(args.output_dir, config=config,
+                                        srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         model.to(args.device)
 
@@ -537,7 +558,8 @@ def main():
         for checkpoint in checkpoints:
             # Reload the model
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
-            model = model_class.from_pretrained(checkpoint)
+            model = model_class.from_pretrained(checkpoint, config=config,
+                                        srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
             model.to(args.device)
 
             # Evaluate
