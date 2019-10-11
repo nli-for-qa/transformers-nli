@@ -331,7 +331,7 @@ def read_squad_examples(input_file, is_training, version_2_with_negative):
     #     examples.extend(paragraphs2examples(paragraph, is_training=is_training, version_2_with_negative=version_2_with_negative))
     with Pool(Thread_num) as p:
         annotate = partial(paragraphs2examples, is_training=is_training, version_2_with_negative=version_2_with_negative)
-        examples = list(tqdm(p.imap(annotate, paragraphs[:10], chunksize=64), total=len(paragraphs),
+        examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
                                      desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
     examples = [example for entry_examples in examples for example in entry_examples]
     return examples
