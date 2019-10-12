@@ -506,8 +506,11 @@ def main():
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
-    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config,
+    if args.srl_label_file:
+        model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config,
                                         srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+    else:
+        model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -539,8 +542,11 @@ def main():
         torch.save(args, os.path.join(args.output_dir, 'training_args.bin'))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        model = model_class.from_pretrained(args.output_dir, config=config,
+        if args.srl_label_file:
+            model = model_class.from_pretrained(args.output_dir, config=config,
                                         srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+        else:
+            model = model_class.from_pretrained(args.output_dir, config=config)
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         model.to(args.device)
 
@@ -558,8 +564,11 @@ def main():
         for checkpoint in checkpoints:
             # Reload the model
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
-            model = model_class.from_pretrained(checkpoint, config=config,
-                                        srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+            if args.srl_label_file:
+                model = model_class.from_pretrained(checkpoint, config=config,
+                                            srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+            else:
+                model = model_class.from_pretrained(checkpoint, config=config)
             model.to(args.device)
 
             # Evaluate

@@ -378,7 +378,7 @@ def convert_examples_to_features(examples, max_seq_length,
     # f = np.zeros((max_N, max_M), dtype=np.float32)
 
     features = []
-    for (example_index, example) in tqdm(enumerate(examples)):
+    for (example_index, example) in tqdm(enumerate(examples), desc='convert example to features', total=len(examples)):
 
         # if example_index % 100 == 0:
         #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
@@ -444,7 +444,12 @@ def convert_examples_to_features(examples, max_seq_length,
             srl_doc_wordpieces = all_doc_tokens
         is_all_doc_token_equal = [ts[0] != ts[1] for ts in zip(all_doc_tokens, srl_doc_wordpieces)]
         is_all_doc_token_equal = sum(is_all_doc_token_equal)
-        assert is_all_doc_token_equal == 0
+        try:
+            assert is_all_doc_token_equal == 0
+        except:
+            print('all doc tokens is not equal to srl doc wordpieces!')
+            print(all_doc_tokens)
+            print(srl_doc_wordpieces)
         tok_start_position = None
         tok_end_position = None
         if is_training and example.is_impossible:
