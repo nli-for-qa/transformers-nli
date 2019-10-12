@@ -381,7 +381,7 @@ def convert_examples_to_features(examples, max_seq_length,
     # f = np.zeros((max_N, max_M), dtype=np.float32)
 
     features = []
-    for (example_index, example) in tqdm(enumerate(examples[6300:]), desc='convert example to features', total=len(examples[6300:])):
+    for (example_index, example) in tqdm(enumerate(examples), desc='convert example to features', total=len(examples)):
 
         # if example_index % 100 == 0:
         #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
