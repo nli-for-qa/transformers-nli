@@ -559,7 +559,10 @@ def convert_examples_to_features(examples, max_seq_length,
                 cls_index = len(tokens) - 1  # Index of classification token
 
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
-            srl_ids = [srl_label_vocab.word2id.get(srl) for srl in srl_tokens]
+            if srl_label_vocab:
+                srl_ids = [srl_label_vocab.word2id.get(srl) for srl in srl_tokens]
+            else:
+                srl_ids = [0 for _ in srl_tokens]
             assert len(input_ids) == len(srl_ids)
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
