@@ -272,9 +272,9 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
         qas_id = qa["id"]
         question_text = qa["question"]
         question_text = clean_text(question_text)
-        question_spacy = spacy_nlp(question_text)
-        question_tokens = [w.text for w in question_spacy if not w.is_space]
-        question_text = " ".join(question_tokens)
+        # question_spacy = spacy_nlp(question_text)
+        # question_tokens = [w.text for w in question_spacy if not w.is_space]
+        question_text = " ".join(question_text.split())
         start_position = None
         end_position = None
         orig_answer_text = None
@@ -403,7 +403,15 @@ def convert_examples_to_features(examples, max_seq_length,
                     print('wordpieces is not equal!')
                     print(question_wordpieces_labels)
                     print(query_tokens)
-                assert len(question_wordpieces_labels) == len(query_tokens)
+                try:
+                    assert len(question_wordpieces_labels) == len(query_tokens)
+                    is_all_query_tokens_equal = sum([w[0][0] != w[1] for w in zip(question_wordpieces_labels, query_tokens)])
+                    assert is_all_query_tokens_equal == 0
+                except:
+                    ##this is trick: srl model used spacy to remove is_space tokens, so it may be defferent here. If
+                    # srl is different from query tokens, we use srl wordpieces directly.
+                    print('query tokens were directly from srl')
+                    query_tokens = [srl[0] for srl in question_wordpieces_labels]
                 srl_question_labels = [srl[1] for srl in question_wordpieces_labels]
                 srl_question_wordpieces = [srl[0] for srl in question_wordpieces_labels]
             else:
