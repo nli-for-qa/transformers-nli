@@ -54,6 +54,7 @@ from utils_squad_srl import (read_squad_examples, convert_examples_to_features,
 # You can remove it from the dependencies if you are using this script outside of the library
 # We've added it here for automated tests (see examples/test_examples.py file)
 from utils_squad_evaluate import EVAL_OPTS, main as evaluate_on_squad
+from knockknock import teams_sender
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,6 @@ MODEL_CLASSES = {
     'distilbert': (DistilBertConfig, DistilBertForQuestionAnswering, DistilBertTokenizer),
     'roberta': (RobertaConfig, RobertaForQuestionAnswering, RobertaTokenizer)
 }
-
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -359,7 +359,8 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
         return dataset, examples, features
     return dataset
 
-
+CHAT_ID: int = 1
+@teams_sender(webhook_url="https://outlook.office.com/webhook/656807a2-c249-4e72-955e-2e967c0716f1@72f988bf-86f1-41af-91ab-2d7cd011db47/IncomingWebhook/1057b874a850467ea4c1276c1eab752b/6ae68729-e69b-44d1-9bce-1803a813b0e3")
 def main():
     parser = argparse.ArgumentParser()
 
@@ -578,7 +579,7 @@ def main():
             results.update(result)
 
     logger.info("Results: {}".format(results))
-
+    results.update({'args': args})
     return results
 
 
