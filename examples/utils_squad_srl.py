@@ -272,9 +272,9 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
         qas_id = qa["id"]
         question_text = qa["question"]
         question_text = clean_text(question_text)
-        # question_spacy = spacy_nlp(question_text)
-        # question_tokens = [w.text for w in question_spacy if not w.is_space]
-        question_text = " ".join(question_text.split())
+        question_spacy = spacy_nlp(question_text)
+        question_tokens = [w.text for w in question_spacy if not w.is_space]
+        question_text = " ".join(question_tokens)
         start_position = None
         end_position = None
         orig_answer_text = None
@@ -401,8 +401,11 @@ def convert_examples_to_features(examples, max_seq_length,
                 if len(question_wordpieces_labels) != len(query_tokens):
                     question_srls = convert2srl(question_text)
                     print('wordpieces is not equal!')
-                    print(question_wordpieces_labels)
-                    print(query_tokens)
+                    try:
+                        print(question_wordpieces_labels)
+                        print(query_tokens)
+                    except:
+                        print('cannot print!')
                 try:
                     assert len(question_wordpieces_labels) == len(query_tokens)
                     is_all_query_tokens_equal = sum([w[0][0] != w[1] for w in zip(question_wordpieces_labels, query_tokens)])
@@ -451,8 +454,11 @@ def convert_examples_to_features(examples, max_seq_length,
                     assert len(srl_doc_wordpieces) == len(all_doc_tokens)
                 except:
                     print("len  all doc tokens is not equal to srl wordpieces labels!")
-                    print(all_doc_tokens)
-                    print(srl_doc_wordpieces)
+                    try:
+                        print(all_doc_tokens)
+                        print(srl_doc_wordpieces)
+                    except:
+                        print('cannot print')
                     srl_doc_labels = ['O' for _ in all_doc_tokens]
                     srl_doc_wordpieces = all_doc_tokens
             else:
@@ -464,8 +470,11 @@ def convert_examples_to_features(examples, max_seq_length,
                 assert is_all_doc_token_equal == 0
             except:
                 print('all doc tokens is not equal to srl doc wordpieces!')
-                print(all_doc_tokens)
-                print(srl_doc_wordpieces)
+                try:
+                    print(all_doc_tokens)
+                    print(srl_doc_wordpieces)
+                except:
+                    print('cannot print')
         tok_start_position = None
         tok_end_position = None
         if is_training and example.is_impossible:
