@@ -22,6 +22,7 @@ import logging
 import os
 import random
 import glob
+import json
 
 import numpy as np
 import torch
@@ -293,9 +294,12 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
         'dev' if evaluate else 'train',
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length)))
-    if os.path.exists(cached_features_file) and not args.overwrite_cache and not output_examples:
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
-        features = torch.load(cached_features_file)
+        data = torch.load(cached_features_file)
+        features = data['features']
+        examples = data['examples']
+
     else:
         logger.info("Creating features from dataset file at %s", input_file)
         examples = read_squad_examples(input_file=input_file,
@@ -319,11 +323,13 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                                                 negtive_sample_probability=args.nsp,
                                                 model_type=args.model_type,
                                                 srl_label_vocab=srl_label_vocab,
+                                                srl_tag_nums=args.srl_tag_nums,
                                                 )
 
         if args.local_rank in [-1, 0]:
-            logger.info("Saving features into cached file %s", cached_features_file)
-            torch.save(features, cached_features_file)
+            logger.info("Saving features and examples into cached file %s", cached_features_file)
+            data = {"features": features, "examples": examples}
+            torch.save(data, cached_features_file)
 
     if args.local_rank == 0 and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
@@ -461,10 +467,12 @@ def main():
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--nsp', type=float, default=1.0, help='negtive examples sample probability')
     parser.add_argument('--srl_label_file', default='', help='srl labels file')
+    parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
     args = parser.parse_args()
 
     if args.model_type == "bert-srl":
         assert args.srl_label_file != ''
+        assert args.srl_tag_nums > 0
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
 
@@ -509,7 +517,7 @@ def main():
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     if args.srl_label_file:
         model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config,
-                                        srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+                                        srl_emb_size=64, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0, srl_tag_nums=args.srl_tag_nums)
     else:
         model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 
@@ -545,7 +553,9 @@ def main():
         # Load a trained model and vocabulary that you have fine-tuned
         if args.srl_label_file:
             model = model_class.from_pretrained(args.output_dir, config=config,
-                                        srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+                                                srl_emb_size=64,
+                                                srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0,
+                                                srl_tag_nums=args.srl_tag_nums)
         else:
             model = model_class.from_pretrained(args.output_dir, config=config)
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
@@ -567,7 +577,9 @@ def main():
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
             if args.srl_label_file:
                 model = model_class.from_pretrained(checkpoint, config=config,
-                                            srl_emb_size=128, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0)
+                                                    srl_emb_size=64,
+                                                    srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0,
+                                                    srl_tag_nums=args.srl_tag_nums)
             else:
                 model = model_class.from_pretrained(checkpoint, config=config)
             model.to(args.device)

@@ -1191,12 +1191,13 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
         self.num_labels = config.num_labels
         self.srl_emb_size = kwargs.pop('srl_emb_size')
         self.srl_vocab_size = kwargs.pop('srl_vocab_size')
+        self.srl_tag_nums = kwargs.pop('srl_tag_nums')
         self.bert = BertModel(config)
         assert self.srl_vocab_size > 0
         self.srl_embedding = nn.Embedding(self.srl_vocab_size, self.srl_emb_size, padding_idx=0)
         self.srl_layer_normal = BertLayerNorm(self.srl_emb_size, eps=config.layer_norm_eps)
         self.srl_emb_dropout = nn.Dropout(0.2)
-        self.qa_outputs = nn.Linear(config.hidden_size + self.srl_emb_size, config.num_labels)
+        self.qa_outputs = nn.Linear(config.hidden_size + (self.srl_emb_size * self.srl_tag_nums), config.num_labels)
 
         self.init_weights()
 
@@ -1210,9 +1211,11 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
                             head_mask=head_mask)
 
         sequence_output = outputs[0]
+        batch_size, seq_leng, bert_emb = tuple(sequence_output.size())
         srl_embedding = self.srl_embedding(srl_ids)
         # srl_embedding = self.srl_layer_normal(srl_embedding)
         srl_embedding = self.srl_emb_dropout(srl_embedding)
+        srl_embedding = srl_embedding.view(batch_size, -1, self.srl_tag_nums * self.srl_emb_size)
         sequence_output_with_srl = torch.cat((sequence_output, srl_embedding), dim=2)
 
         logits = self.qa_outputs(sequence_output_with_srl)

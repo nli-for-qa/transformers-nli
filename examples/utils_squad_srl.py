@@ -339,7 +339,7 @@ def read_squad_examples(input_file, is_training, version_2_with_negative):
     examples = [example for entry_examples in examples for example in entry_examples]
     return examples
 
-def convert2srl(para):
+def convert2srl(para, srl_tag_nums=3):
     sent_ends = [m.start() for m in re.finditer(r'[\.!?]', para)]
     if not sent_ends:
         sent_ends = [len(para) - 1]
@@ -348,11 +348,25 @@ def convert2srl(para):
         sent_ends.append(len(para))
     sent_starts = [0] + sent_ends
     sent_spans = list(zip(sent_starts, sent_ends))
-    sentences = [{'sentence': para[span[0]:span[1]], 'sent_span': span} for span in sent_spans]
+    sentences = [{'sentence': para[span[0]:span[1]], 'sent_span': span, 'wordpiece_tags': []} for span in sent_spans]
     sentences_srl = predictor_srl.predict_batch_json(sentences)
     for sent_index, sent_srl in enumerate(sentences_srl):
+        sent_srl['wordpiece_tags'] = []
         sentences[sent_index].update(sent_srl)
-        sentences[sent_index]['wordpiece_tags'] =sent_srl['verbs'][0]['wordpiece_tags'] if sent_srl['verbs'] else ["O" for _ in sent_srl['wordpieces']]
+        for srl_index, srl_tags in enumerate(sent_srl['verbs']):
+            sentences[sent_index]['wordpiece_tags'].append(srl_tags['wordpiece_tags'])
+        if len(sentences[sent_index]['wordpiece_tags']) >= srl_tag_nums:
+            sentences[sent_index]['wordpiece_tags'] = sentences[sent_index]['wordpiece_tags'][:srl_tag_nums]
+        else:
+            attach_num = srl_tag_nums - len(sentences[sent_index]['wordpiece_tags'])
+            attach_tags = [['O' for _ in range(len(sentences[sent_index]['wordpieces']))] for _ in range(attach_num)]
+            sentences[sent_index]['wordpiece_tags'].extend(attach_tags)
+
+        sentence_tags_new = list(map(list, zip(*sentences[sent_index]['wordpiece_tags'])))
+        assert len(sentence_tags_new) == len(sentences[sent_index]['wordpieces'])
+        sentences[sent_index]['wordpiece_tags'] = sentence_tags_new
+
+
     return sentences
 
 def convert_examples_to_features(examples, max_seq_length,
@@ -372,7 +386,8 @@ def convert_examples_to_features(examples, max_seq_length,
                                  add_prefix_space=False,
                                  negtive_sample_probability=1.0,
                                  model_type='bert',
-                                 srl_label_vocab=None):
+                                 srl_label_vocab=None,
+                                 srl_tag_nums=3):
     """Loads a data file into a list of `InputBatch`s."""
 
     unique_id = 1000000000
@@ -392,14 +407,13 @@ def convert_examples_to_features(examples, max_seq_length,
         ##todo other models' srl beyond bert
         question_text = example.question_text
         if srl_label_vocab:
-            question_srls = convert2srl(question_text)
+            question_srls = convert2srl(question_text, srl_tag_nums=srl_tag_nums)
             question_verbs = [len(srl['verbs']) for srl in question_srls]
             question_verbs_sum =sum(question_verbs)
             assert len(question_srls) >= 1
             if question_verbs_sum:
-                question_wordpieces_labels = [[wp, wpl] for srl in question_srls for wp, wpl in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
+                question_wordpieces_labels = [[wp, wpls] for srl in question_srls for wp, wpls in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
                 if len(question_wordpieces_labels) != len(query_tokens):
-                    question_srls = convert2srl(question_text)
                     print('wordpieces is not equal!')
                     try:
                         print(question_wordpieces_labels)
@@ -418,7 +432,7 @@ def convert_examples_to_features(examples, max_seq_length,
                 srl_question_labels = [srl[1] for srl in question_wordpieces_labels]
                 srl_question_wordpieces = [srl[0] for srl in question_wordpieces_labels]
             else:
-                srl_question_labels = ['O' for _ in query_tokens]
+                srl_question_labels = [['O' for _ in range(srl_tag_nums)] for _ in query_tokens]
                 srl_question_wordpieces = query_tokens
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]
@@ -442,7 +456,7 @@ def convert_examples_to_features(examples, max_seq_length,
 
         if srl_label_vocab:
             doc_text = example.doc_text
-            doc_srls = convert2srl(doc_text)
+            doc_srls = convert2srl(doc_text, srl_tag_nums=srl_tag_nums)
             doc_verbs = [len(srl['verbs']) for srl in doc_srls]
             doc_verbs_sum = sum(doc_verbs)
             assert len(doc_srls) >= 1
@@ -459,10 +473,10 @@ def convert_examples_to_features(examples, max_seq_length,
                         print(srl_doc_wordpieces)
                     except:
                         print('cannot print')
-                    srl_doc_labels = ['O' for _ in all_doc_tokens]
+                    srl_doc_labels = [['O' for _ in range(srl_tag_nums)] for _ in all_doc_tokens]
                     srl_doc_wordpieces = all_doc_tokens
             else:
-                srl_doc_labels = ['O' for _ in all_doc_tokens]
+                srl_doc_labels = [['O' for _ in range(srl_tag_nums)] for _ in all_doc_tokens]
                 srl_doc_wordpieces = all_doc_tokens
             is_all_doc_token_equal = [ts[0] != ts[1] for ts in zip(all_doc_tokens, srl_doc_wordpieces)]
             is_all_doc_token_equal = sum(is_all_doc_token_equal)
@@ -529,7 +543,7 @@ def convert_examples_to_features(examples, max_seq_length,
             if not cls_token_at_end:
                 tokens.append(cls_token)
                 if srl_label_vocab:
-                    srl_tokens.append('O')
+                    srl_tokens.append(['O' for _ in range(srl_tag_nums)] )
                 segment_ids.append(cls_token_segment_id)
                 p_mask.append(0)
                 cls_index = 0
@@ -554,13 +568,13 @@ def convert_examples_to_features(examples, max_seq_length,
                 # roberta uses an extra separator b/w pairs of sentences
                 tokens += [sep_token]
                 if srl_label_vocab:
-                    srl_tokens.append('O')
+                    srl_tokens.append(['O' for _ in range(srl_tag_nums)])
                 segment_ids.append(sequence_a_segment_id)
                 p_mask.append(1)
 
             tokens.append(sep_token)
             if srl_label_vocab:
-                srl_tokens.append('O')
+                srl_tokens.append(['O' for _ in range(srl_tag_nums)])
             segment_ids.append(sequence_a_segment_id)
             p_mask.append(1)
 
@@ -583,7 +597,7 @@ def convert_examples_to_features(examples, max_seq_length,
             # SEP token
             tokens.append(sep_token)
             if srl_label_vocab:
-                srl_tokens.append('O')
+                srl_tokens.append(['O' for _ in range(srl_tag_nums)])
             segment_ids.append(sequence_b_segment_id)
             p_mask.append(1)
 
@@ -591,14 +605,14 @@ def convert_examples_to_features(examples, max_seq_length,
             if cls_token_at_end:
                 tokens.append(cls_token)
                 if srl_label_vocab:
-                    srl_tokens.append('O')
+                    srl_tokens.append(['O' for _ in range(srl_tag_nums)])
                 segment_ids.append(cls_token_segment_id)
                 p_mask.append(0)
                 cls_index = len(tokens) - 1  # Index of classification token
 
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
             if srl_label_vocab:
-                srl_ids = [srl_label_vocab.word2id.get(srl) for srl in srl_tokens]
+                srl_ids = [[srl_label_vocab.word2id.get(srl) for srl in srls] for srls in srl_tokens]
                 assert len(input_ids) == len(srl_ids)
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
@@ -609,16 +623,16 @@ def convert_examples_to_features(examples, max_seq_length,
             if pad_on_left:
                 input_ids = ([pad_token] * padding_length) + input_ids
                 if srl_label_vocab:
-                    srl_ids = ([0] * padding_length) + srl_ids
-                    srl_ids1 = ([0] * padding_length) + srl_ids
+                    srl_ids = ([[0 for _ in range(srl_tag_nums)]] * padding_length) + srl_ids
+                    srl_ids1 = ([[0 for _ in range(srl_tag_nums)]] * padding_length) + srl_ids
                 input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
                 segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
                 p_mask = ([1] * padding_length) + p_mask
             else:
                 input_ids = input_ids + ([pad_token] * padding_length)
                 if srl_label_vocab:
-                    srl_ids1 = srl_ids + ([0] * padding_length)
-                    srl_ids = srl_ids + ([0] * padding_length)
+                    srl_ids1 = srl_ids + ([[0 for _ in range(srl_tag_nums)]] * padding_length)
+                    srl_ids = srl_ids + ([[0 for _ in range(srl_tag_nums)]] * padding_length)
                 input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
                 segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
                 p_mask = p_mask + ([1] * padding_length)
@@ -628,6 +642,7 @@ def convert_examples_to_features(examples, max_seq_length,
             #     input_mask.append(0 if mask_padding_with_zero else 1)
             #     segment_ids.append(pad_token_segment_id)
             #     p_mask.append(1)
+            assert len(input_ids) == len(srl_ids1)
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
