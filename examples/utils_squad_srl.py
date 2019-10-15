@@ -240,21 +240,21 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
             return True
         return False
 
-    paragraph_text = clean_text(paragraph["context"])
-    doc_spacy = spacy_nlp(paragraph_text)
-    doc_tokens = [w.text for w in doc_spacy if not w.is_space]
-    doc_token_spans = [(w.idx, w.idx + len(w.text)) for w in doc_spacy if not w.is_space]
-    char_to_word_offset = []
-    start = 0
-    assert len(doc_token_spans) >= 1
-    for token_index, token_span in enumerate(doc_token_spans[1:]):
-        for _ in range(start, token_span[0]):
-            char_to_word_offset.append(token_index)
-        start = token_span[0]
-    for _ in range(start, len(paragraph_text)):
-        char_to_word_offset.append(len(doc_tokens) - 1)
-    assert len(char_to_word_offset) == len(paragraph_text)
-
+    # paragraph_text = clean_text(paragraph["context"])
+    # doc_spacy = spacy_nlp(paragraph_text)
+    # doc_tokens = [w.text for w in doc_spacy if not w.is_space]
+    # doc_token_spans = [(w.idx, w.idx + len(w.text)) for w in doc_spacy if not w.is_space]
+    # char_to_word_offset = []
+    # start = 0
+    # assert len(doc_token_spans) >= 1
+    # for token_index, token_span in enumerate(doc_token_spans[1:]):
+    #     for _ in range(start, token_span[0]):
+    #         char_to_word_offset.append(token_index)
+    #     start = token_span[0]
+    # for _ in range(start, len(paragraph_text)):
+    #     char_to_word_offset.append(len(doc_tokens) - 1)
+    # assert len(char_to_word_offset) == len(paragraph_text)
+    paragraph_text = paragraph["context"]
     doc_tokens_original = []
     char_to_word_offset_original = []
     prev_is_whitespace = True
@@ -268,13 +268,16 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
                 doc_tokens_original[-1] += c
             prev_is_whitespace = False
         char_to_word_offset_original.append(len(doc_tokens_original) - 1)
+    doc_tokens = doc_tokens_original[:]
+    char_to_word_offset = char_to_word_offset_original[:]
+
     for qa in paragraph["qas"]:
         qas_id = qa["id"]
         question_text = qa["question"]
-        question_text = clean_text(question_text)
-        question_spacy = spacy_nlp(question_text)
-        question_tokens = [w.text for w in question_spacy if not w.is_space]
-        question_text = " ".join(question_tokens)
+        # question_text = clean_text(question_text)
+        # question_spacy = spacy_nlp(question_text)
+        # question_tokens = [w.text for w in question_spacy if not w.is_space]
+        # question_text = " ".join(question_tokens)
         start_position = None
         end_position = None
         orig_answer_text = None
@@ -298,10 +301,8 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
                 #
                 # Note that this means for training mode, every example is NOT
                 # guaranteed to be preserved.
-                actual_text = "".join(doc_tokens[start_position:(end_position + 1)])
-                orig_answer_text = clean_text(orig_answer_text)
-                orig_answer_text = "".join([w.text for w in spacy_nlp(orig_answer_text)])
-                cleaned_answer_text = "".join(
+                actual_text = " ".join(doc_tokens[start_position:(end_position + 1)])
+                cleaned_answer_text = " ".join(
                     whitespace_tokenize(orig_answer_text))
                 if actual_text.find(cleaned_answer_text) == -1:
                     logger.warning("Could not find answer: '%s' vs. '%s'",
