@@ -468,6 +468,7 @@ def main():
     parser.add_argument('--nsp', type=float, default=1.0, help='negtive examples sample probability')
     parser.add_argument('--srl_label_file', default='', help='srl labels file')
     parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
+    parser.add_argument('--srl_fusion_style', default='bert_emb_late', type=str)
     args = parser.parse_args()
 
     if args.model_type == "bert-srl":
@@ -514,12 +515,17 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
+    if srl_label_vocab:
+        setattr(config, 'srl_vocab_size', len(srl_label_vocab))
+        setattr(config, 'srl_emb_size', 64)
+        setattr(config, 'srl_tag_nums', args.srl_tag_nums)
+        setattr(config, 'srl_fusion_style', args.srl_fusion_style)
+        if args.srl_fusion_style == 'bert_emb_early':
+            setattr(config, 'srl_emb_size', config.hidden_size // config.srl_tag_nums)
+            logger.info('we need config.srl_emb_size * config.srl_tag_nums == config.hidden_size')
+            assert config.srl_emb_size * config.srl_tag_nums == config.hidden_size
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
-    if args.srl_label_file:
-        model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config,
-                                        srl_emb_size=64, srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0, srl_tag_nums=args.srl_tag_nums)
-    else:
-        model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
+    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
@@ -551,13 +557,7 @@ def main():
         torch.save(args, os.path.join(args.output_dir, 'training_args.bin'))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        if args.srl_label_file:
-            model = model_class.from_pretrained(args.output_dir, config=config,
-                                                srl_emb_size=64,
-                                                srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0,
-                                                srl_tag_nums=args.srl_tag_nums)
-        else:
-            model = model_class.from_pretrained(args.output_dir, config=config)
+        model = model_class.from_pretrained(args.output_dir, config=config)
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         model.to(args.device)
 
@@ -575,13 +575,7 @@ def main():
         for checkpoint in checkpoints:
             # Reload the model
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
-            if args.srl_label_file:
-                model = model_class.from_pretrained(checkpoint, config=config,
-                                                    srl_emb_size=64,
-                                                    srl_vocab_size=len(srl_label_vocab) if srl_label_vocab else 0,
-                                                    srl_tag_nums=args.srl_tag_nums)
-            else:
-                model = model_class.from_pretrained(checkpoint, config=config)
+            model = model_class.from_pretrained(checkpoint, config=config)
             model.to(args.device)
 
             # Evaluate

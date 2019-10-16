@@ -148,14 +148,20 @@ class BertEmbeddings(nn.Module):
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=0)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
-
+        self.srl_label_embeddings = None
+        if getattr(config, 'srl_fusion_style', None):
+            if config.srl_fusion_style == 'bert_emb_early':
+                logger.info('srl emb size * srl tag nums in bert fusion early is expected to equal to hidden_size')
+                assert config.hidden_size == config.srl_emb_size * config.srl_tag_nums
+                self.srl_label_embeddings = nn.Embedding(config.srl_vocab_size, config.srl_emb_size, padding_idx=0)
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, input_ids, token_type_ids=None, position_ids=None):
+    def forward(self, input_ids, token_type_ids=None, position_ids=None, srl_ids=None):
         seq_length = input_ids.size(1)
+        batch_size = input_ids.size(0)
         if position_ids is None:
             position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
             position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
@@ -165,8 +171,12 @@ class BertEmbeddings(nn.Module):
         words_embeddings = self.word_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-
-        embeddings = words_embeddings + position_embeddings + token_type_embeddings
+        if self.srl_label_embeddings and srl_ids:
+            srl_label_embeddings = self.srl_label_embeddings(srl_ids)
+            srl_label_embeddings = srl_label_embeddings.view(batch_size, seq_length, -1)
+            embeddings = words_embeddings + position_embeddings + token_type_embeddings + srl_label_embeddings
+        else:
+            embeddings = words_embeddings + position_embeddings + token_type_embeddings
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
@@ -583,7 +593,7 @@ class BertModel(BertPreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.encoder.layer[layer].attention.prune_heads(heads)
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None):
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None, srl_ids=None):
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
         if token_type_ids is None:
@@ -619,7 +629,7 @@ class BertModel(BertPreTrainedModel):
         else:
             head_mask = [None] * self.config.num_hidden_layers
 
-        embedding_output = self.embeddings(input_ids, position_ids=position_ids, token_type_ids=token_type_ids)
+        embedding_output = self.embeddings(input_ids, position_ids=position_ids, token_type_ids=token_type_ids, srl_ids=srl_ids)
         encoder_outputs = self.encoder(embedding_output,
                                        extended_attention_mask,
                                        head_mask=head_mask)
@@ -1187,17 +1197,24 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
 
     """
     def __init__(self, config, *inputs, **kwargs):
-        super(BertForQuestionAnsweringSrl, self).__init__(config, *inputs, **kwargs)
+        super(BertForQuestionAnsweringSrl, self).__init__(config)
+        self.srl_fusion_style = config.srl_fusion_style
         self.num_labels = config.num_labels
-        self.srl_emb_size = kwargs.pop('srl_emb_size')
-        self.srl_vocab_size = kwargs.pop('srl_vocab_size')
-        self.srl_tag_nums = kwargs.pop('srl_tag_nums')
-        self.bert = BertModel(config)
-        assert self.srl_vocab_size > 0
-        self.srl_embedding = nn.Embedding(self.srl_vocab_size, self.srl_emb_size, padding_idx=0)
-        self.srl_layer_normal = BertLayerNorm(self.srl_emb_size, eps=config.layer_norm_eps)
-        self.srl_emb_dropout = nn.Dropout(0.2)
-        self.qa_outputs = nn.Linear(config.hidden_size + (self.srl_emb_size * self.srl_tag_nums), config.num_labels)
+        if self.srl_fusion_style == 'bert_emb_late':
+            self.srl_emb_size = config.srl_emb_size
+            self.srl_vocab_size = config.srl_vocab_size
+            self.srl_tag_nums = config.srl_tag_nums
+            self.bert = BertModel(config)
+            assert self.srl_vocab_size > 0
+            self.srl_embedding = nn.Embedding(self.srl_vocab_size, self.srl_emb_size, padding_idx=0)
+            self.srl_layer_normal = BertLayerNorm(self.srl_emb_size, eps=config.layer_norm_eps)
+            self.srl_emb_dropout = nn.Dropout(0.2)
+            self.srl_activation = nn.Tanh()
+            self.srl_projection = nn.Linear(self.srl_emb_size, self.srl_emb_size)
+            self.qa_outputs = nn.Linear(config.hidden_size + (self.srl_emb_size * self.srl_tag_nums), config.num_labels)
+        elif self.srl_fusion_style == 'bert_emb_early':
+            self.bert = BertModel(config)
+            self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
         self.init_weights()
 
@@ -1208,17 +1225,21 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
                             attention_mask=attention_mask,
                             token_type_ids=token_type_ids,
                             position_ids=position_ids,
-                            head_mask=head_mask)
+                            head_mask=head_mask,
+                            srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
 
         sequence_output = outputs[0]
         batch_size, seq_leng, bert_emb = tuple(sequence_output.size())
-        srl_embedding = self.srl_embedding(srl_ids)
-        # srl_embedding = self.srl_layer_normal(srl_embedding)
-        srl_embedding = self.srl_emb_dropout(srl_embedding)
-        srl_embedding = srl_embedding.view(batch_size, -1, self.srl_tag_nums * self.srl_emb_size)
-        sequence_output_with_srl = torch.cat((sequence_output, srl_embedding), dim=2)
+        if self.srl_fusion_style == 'bert_emb_late':
+            srl_embedding = self.srl_embedding(srl_ids)
+            # srl_embedding = self.srl_layer_normal(srl_embedding)
+            srl_embedding = self.srl_emb_dropout(srl_embedding)
+            srl_embedding = self.srl_activation(srl_embedding)
+            srl_embedding = self.srl_projection(srl_embedding)
+            srl_embedding = srl_embedding.view(batch_size, -1, self.srl_tag_nums * self.srl_emb_size)
+            sequence_output = torch.cat((sequence_output, srl_embedding), dim=2)
 
-        logits = self.qa_outputs(sequence_output_with_srl)
+        logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
