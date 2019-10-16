@@ -643,7 +643,8 @@ def convert_examples_to_features(examples, max_seq_length,
             #     input_mask.append(0 if mask_padding_with_zero else 1)
             #     segment_ids.append(pad_token_segment_id)
             #     p_mask.append(1)
-            assert len(input_ids) == len(srl_ids1)
+            if srl_label_vocab:
+                assert len(input_ids) == len(srl_ids1)
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
