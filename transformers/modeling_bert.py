@@ -1223,6 +1223,11 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             # self.bert_srl_dropout = nn.Dropout(0.2)
             # self.bert_srl_projection = nn.Linear(config.hidden_size * self.srl_tag_nums, config.hidden_size)
             self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size * self.srl_tag_nums, config.num_labels)
+        elif self.srl_fusion_style == 'bert_srl_concat':
+            self.bert = BertModel(config)
+            logger.info('logging srl model from: {}'.format(config.bert_srl_model_path))
+            self.bert_srl = BertModel.from_pretrained(config.bert_srl_model_path)
+            self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
 
         self.init_weights()
 
@@ -1266,6 +1271,15 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             # srl_sequence_output = self.bert_srl_projection(srl_sequence_output)
             # srl_sequence_output = self.bert_srl_dropout(srl_sequence_output)
             sequence_output = torch.cat((sequence_output, srl_sequence_output), dim=2)
+        elif self.srl_fusion_style == 'bert_srl_concat':
+            srl_outputs = self.bert_srl(input_ids,
+                                        attention_mask=attention_mask,
+                                        token_type_ids=token_type_ids,
+                                        position_ids=position_ids,
+                                        head_mask=head_mask,
+                                        srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
+            srl_outputs = srl_outputs[0]
+            sequence_output = torch.cat((sequence_output, srl_outputs), dim=2)
 
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)
