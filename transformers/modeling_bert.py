@@ -171,7 +171,7 @@ class BertEmbeddings(nn.Module):
         words_embeddings = self.word_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-        if self.srl_label_embeddings and srl_ids:
+        if self.srl_label_embeddings and srl_ids is not None:
             srl_label_embeddings = self.srl_label_embeddings(srl_ids)
             srl_label_embeddings = srl_label_embeddings.view(batch_size, seq_length, -1)
             embeddings = words_embeddings + position_embeddings + token_type_embeddings + srl_label_embeddings
@@ -1215,12 +1215,19 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
         elif self.srl_fusion_style == 'bert_emb_early':
             self.bert = BertModel(config)
             self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
+        elif self.srl_fusion_style == 'bert_att_late':
+            #bert + (bert srl att attention)
+            self.srl_tag_nums = config.srl_tag_nums
+            self.bert = BertModel(config)
+            self.bert_srl_dropout = nn.Dropout(0.2)
+            self.bert_srl_projection = nn.Linear(config.hidden_size * self.srl_tag_nums, config.hidden_size)
+            self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
 
         self.init_weights()
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 start_positions=None, end_positions=None, srl_ids=None):
-
+        #srl ids: bs x seq_length x channel
         outputs = self.bert(input_ids,
                             attention_mask=attention_mask,
                             token_type_ids=token_type_ids,
@@ -1236,8 +1243,28 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             srl_embedding = self.srl_emb_dropout(srl_embedding)
             srl_embedding = self.srl_activation(srl_embedding)
             srl_embedding = self.srl_projection(srl_embedding)
+            srl_embedding = self.srl_emb_dropout(srl_embedding)
             srl_embedding = srl_embedding.view(batch_size, -1, self.srl_tag_nums * self.srl_emb_size)
             sequence_output = torch.cat((sequence_output, srl_embedding), dim=2)
+        elif self.srl_fusion_style == 'bert_att_late':
+            srl_sequence_output = []
+            for channel in range(self.srl_tag_nums):
+                srl_ids_part = srl_ids[:,:,channel].contiguous()
+                attention_mask = srl_ids_part != 0
+                attention_mask = attention_mask.to(torch.long)
+                srl_outputs = self.bert(input_ids,
+                                    attention_mask=attention_mask,
+                                    token_type_ids=token_type_ids,
+                                    position_ids=position_ids,
+                                    head_mask=head_mask,
+                                    srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
+                srl_outputs = self.bert_srl_dropout(srl_outputs[0])
+                srl_outputs = srl_outputs.detach()
+                srl_sequence_output.append(srl_outputs)
+            srl_sequence_output = torch.stack(srl_sequence_output, dim=2).view(batch_size, seq_leng, -1)
+            srl_sequence_output = self.bert_srl_projection(srl_sequence_output)
+            srl_sequence_output = self.bert_srl_dropout(srl_sequence_output)
+            sequence_output = torch.cat((sequence_output, srl_sequence_output), dim=2)
 
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)

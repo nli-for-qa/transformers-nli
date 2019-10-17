@@ -181,6 +181,7 @@ def train(args, train_dataset, model, tokenizer):
                             tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                    logger.info('average loss {}, global step {}'.format((tr_loss - logging_loss)/args.logging_steps, global_step))
                     logging_loss = tr_loss
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -468,7 +469,7 @@ def main():
     parser.add_argument('--nsp', type=float, default=1.0, help='negtive examples sample probability')
     parser.add_argument('--srl_label_file', default='', help='srl labels file')
     parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
-    parser.add_argument('--srl_fusion_style', default='bert_emb_late', type=str)
+    parser.add_argument('--srl_fusion_style', default='bert_att_late', type=str)
     args = parser.parse_args()
 
     if args.model_type == "bert-srl":
