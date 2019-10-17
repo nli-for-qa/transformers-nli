@@ -1219,9 +1219,10 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             #bert + (bert srl att attention)
             self.srl_tag_nums = config.srl_tag_nums
             self.bert = BertModel(config)
-            self.bert_srl_dropout = nn.Dropout(0.2)
-            self.bert_srl_projection = nn.Linear(config.hidden_size * self.srl_tag_nums, config.hidden_size)
-            self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
+            self.bert_srl = BertModel(config)
+            # self.bert_srl_dropout = nn.Dropout(0.2)
+            # self.bert_srl_projection = nn.Linear(config.hidden_size * self.srl_tag_nums, config.hidden_size)
+            self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size * self.srl_tag_nums, config.num_labels)
 
         self.init_weights()
 
@@ -1252,18 +1253,18 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
                 srl_ids_part = srl_ids[:,:,channel].contiguous()
                 attention_mask = srl_ids_part != 0
                 attention_mask = attention_mask.to(torch.long)
-                srl_outputs = self.bert(input_ids,
+                srl_outputs = self.bert_srl(input_ids,
                                     attention_mask=attention_mask,
                                     token_type_ids=token_type_ids,
                                     position_ids=position_ids,
                                     head_mask=head_mask,
                                     srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
-                srl_outputs = self.bert_srl_dropout(srl_outputs[0])
-                srl_outputs = srl_outputs.detach()
+                # srl_outputs = self.bert_srl_dropout(srl_outputs[0])
+                srl_outputs = srl_outputs[0]
                 srl_sequence_output.append(srl_outputs)
             srl_sequence_output = torch.stack(srl_sequence_output, dim=2).view(batch_size, seq_leng, -1)
-            srl_sequence_output = self.bert_srl_projection(srl_sequence_output)
-            srl_sequence_output = self.bert_srl_dropout(srl_sequence_output)
+            # srl_sequence_output = self.bert_srl_projection(srl_sequence_output)
+            # srl_sequence_output = self.bert_srl_dropout(srl_sequence_output)
             sequence_output = torch.cat((sequence_output, srl_sequence_output), dim=2)
 
         logits = self.qa_outputs(sequence_output)
