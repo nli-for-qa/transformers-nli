@@ -96,9 +96,11 @@ def train(args, train_dataset, model, tokenizer):
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
-    for n, p in model.named_parameters():
-        if 'bert_srl' in n:
-            p.requires_grad = False
+    if not args.bert_srl_with_grad:
+        logger.info('bert_srl without grad!')
+        for n, p in model.named_parameters():
+            if 'bert_srl' in n:
+                p.requires_grad = False
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
         {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
@@ -474,6 +476,7 @@ def main():
     parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
     parser.add_argument('--srl_fusion_style', default='bert_srl_concat', type=str)
     parser.add_argument('--bert_srl_model_path', default='', type=str)
+    parser.add_argument('--bert_srl_with_grad', default=False, type=bool)
     args = parser.parse_args()
 
     if args.model_type == "bert-srl":

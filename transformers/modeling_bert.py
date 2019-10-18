@@ -1227,6 +1227,7 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             self.bert = BertModel(config)
             logger.info('logging srl model from: {}'.format(config.bert_srl_model_path))
             self.bert_srl = BertModel.from_pretrained(config.bert_srl_model_path)
+            self.bert_srl_dropout = nn.Dropout(p=0.2)
             self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
 
         self.init_weights()
@@ -1256,8 +1257,9 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             srl_sequence_output = []
             for channel in range(self.srl_tag_nums):
                 srl_ids_part = srl_ids[:,:,channel].contiguous()
-                attention_mask = srl_ids_part != 0
-                attention_mask = attention_mask.to(torch.long)
+                attention_mask0 = (srl_ids_part == 0).to(torch.long)
+                attention_mask1 = (srl_ids_part == 1).to(torch.long)
+                attention_mask = (1 - (attention_mask0 + attention_mask1)).to(torch.long)
                 srl_outputs = self.bert_srl(input_ids,
                                     attention_mask=attention_mask,
                                     token_type_ids=token_type_ids,
@@ -1272,13 +1274,18 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             # srl_sequence_output = self.bert_srl_dropout(srl_sequence_output)
             sequence_output = torch.cat((sequence_output, srl_sequence_output), dim=2)
         elif self.srl_fusion_style == 'bert_srl_concat':
+            token_type_ids5 = srl_ids.eq(5).to(torch.long) #B-V
+            token_type_ids22 = srl_ids.eq(22).to(torch.long) #I-V
+            token_type_ids = (token_type_ids5 + token_type_ids22).to(torch.long)
+            token_type_ids_new = (torch.sum(token_type_ids, dim=2) > 0).to(torch.long)
             srl_outputs = self.bert_srl(input_ids,
                                         attention_mask=attention_mask,
-                                        token_type_ids=token_type_ids,
+                                        token_type_ids=token_type_ids_new,
                                         position_ids=position_ids,
                                         head_mask=head_mask,
                                         srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
             srl_outputs = srl_outputs[0]
+            srl_outputs = self.bert_srl_dropout(srl_outputs)
             sequence_output = torch.cat((sequence_output, srl_outputs), dim=2)
 
         logits = self.qa_outputs(sequence_output)
