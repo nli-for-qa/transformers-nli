@@ -1229,6 +1229,11 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             self.bert_srl = BertModel.from_pretrained(config.bert_srl_model_path)
             self.bert_srl_dropout = nn.Dropout(p=0.2)
             self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
+        elif self.srl_fusion_style == 'bert_srl_att':
+            self.bert = BertModel(config)
+            self.bert_att_layer = BertLayer(config)
+            self.srl_tag_nums = config.srl_tag_nums
+            self.qa_outputs = nn.Linear(config.hidden_size * self.srl_tag_nums, config.num_labels)
 
         self.init_weights()
 
@@ -1287,6 +1292,20 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             srl_outputs = srl_outputs[0]
             srl_outputs = self.bert_srl_dropout(srl_outputs)
             sequence_output = torch.cat((sequence_output, srl_outputs), dim=2)
+        elif self.srl_fusion_style == 'bert_srl_att':
+            srl_att_sequence_output = []
+            for channel in range(self.srl_tag_nums):
+                srl_ids_part = srl_ids[:, :, channel].contiguous()
+                attention_mask0 = (srl_ids_part == 0).to(torch.long)
+                attention_mask1 = (srl_ids_part == 1).to(torch.long)
+                attention_mask = (1 - (attention_mask0 + attention_mask1)).to(torch.long)
+                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+                extended_attention_mask = extended_attention_mask.to(
+                    dtype=next(self.parameters()).dtype)
+                extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+                bert_att_output = self.bert_att_layer(sequence_output, extended_attention_mask)
+                srl_att_sequence_output.append(bert_att_output[0])
+            sequence_output = torch.stack(srl_att_sequence_output, dim=2).view(batch_size, seq_leng, -1)
 
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)

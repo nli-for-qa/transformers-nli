@@ -474,7 +474,7 @@ def main():
     parser.add_argument('--nsp', type=float, default=1.0, help='negtive examples sample probability')
     parser.add_argument('--srl_label_file', default='', help='srl labels file')
     parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
-    parser.add_argument('--srl_fusion_style', default='bert_srl_concat', type=str)
+    parser.add_argument('--srl_fusion_style', default='bert_srl_att', type=str)
     parser.add_argument('--bert_srl_model_path', default='', type=str)
     parser.add_argument('--bert_srl_with_grad', default=False, type=bool)
     args = parser.parse_args()
@@ -524,13 +524,14 @@ def main():
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
     setattr(config, 'srl_fusion_style', args.srl_fusion_style)
+    setattr(config, 'srl_tag_nums', args.srl_tag_nums)
     if args.srl_fusion_style == 'bert_srl_concat':
         assert args.bert_srl_model_path != ''
         setattr(config, 'bert_srl_model_path', args.bert_srl_model_path)
     if srl_label_vocab and not args.bert_srl_model_path:
         setattr(config, 'srl_vocab_size', len(srl_label_vocab))
         setattr(config, 'srl_emb_size', 64)
-        setattr(config, 'srl_tag_nums', args.srl_tag_nums)
+
         if args.srl_fusion_style == 'bert_emb_early':
             setattr(config, 'srl_emb_size', config.hidden_size // config.srl_tag_nums)
             logger.info('we need config.srl_emb_size * config.srl_tag_nums == config.hidden_size')
