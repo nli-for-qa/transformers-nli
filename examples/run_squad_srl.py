@@ -83,7 +83,8 @@ def to_list(tensor):
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        logger.info('tensorboard logs into {}'.format(args.logdir if args.logdir else args.experiment_name + args.model_type + "_" + str(args.srl_fusion_style) + "_" + str(args.train_file)))
+        tb_writer = SummaryWriter(log_dir=args.logdir, comment=args.experiment_name + args.model_type + "_" + str(args.srl_fusion_style) + "_" + str(args.train_file))
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -477,6 +478,8 @@ def main():
     parser.add_argument('--srl_fusion_style', default='bert_srl_att', type=str)
     parser.add_argument('--bert_srl_model_path', default='', type=str)
     parser.add_argument('--bert_srl_with_grad', default=False, type=bool)
+    parser.add_argument('--logdir', default='', type=str)
+    parser.add_argument('--experiment_name', default='', type=str)
     args = parser.parse_args()
 
     if args.model_type == "bert-srl":
@@ -523,15 +526,15 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
-    setattr(config, 'srl_fusion_style', args.srl_fusion_style)
-    setattr(config, 'srl_tag_nums', args.srl_tag_nums)
+    if args.model_type == 'bert-srl':
+        setattr(config, 'srl_fusion_style', args.srl_fusion_style)
+        setattr(config, 'srl_tag_nums', args.srl_tag_nums)
+        setattr(config, 'srl_label_vocab', srl_label_vocab)
     if args.srl_fusion_style == 'bert_srl_concat':
         assert args.bert_srl_model_path != ''
         setattr(config, 'bert_srl_model_path', args.bert_srl_model_path)
     if srl_label_vocab and not args.bert_srl_model_path:
-        setattr(config, 'srl_vocab_size', len(srl_label_vocab))
         setattr(config, 'srl_emb_size', 64)
-
         if args.srl_fusion_style == 'bert_emb_early':
             setattr(config, 'srl_emb_size', config.hidden_size // config.srl_tag_nums)
             logger.info('we need config.srl_emb_size * config.srl_tag_nums == config.hidden_size')

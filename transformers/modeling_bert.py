@@ -1200,6 +1200,9 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
         super(BertForQuestionAnsweringSrl, self).__init__(config)
         self.srl_fusion_style = config.srl_fusion_style
         self.num_labels = config.num_labels
+        from transformers.tokenization_bert import BertTokenizer
+        self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        self.srl_label_vocab = config.srl_label_vocab
         if self.srl_fusion_style == 'bert_emb_late':
             self.srl_emb_size = config.srl_emb_size
             self.srl_vocab_size = config.srl_vocab_size
@@ -1231,9 +1234,16 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             self.qa_outputs = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
         elif self.srl_fusion_style == 'bert_srl_att':
             self.bert = BertModel(config)
-            self.bert_att_layer = BertLayer(config)
+            self.bert_att_hidden_size = config.hidden_size // config.srl_tag_nums
+            self.bert_projection = nn.Linear(config.hidden_size, self.bert_att_hidden_size)
+            self.bert_projection_dropout = nn.Dropout(p=0.1)
+            self.bert_projection_layernorm = BertLayerNorm(self.bert_att_hidden_size, eps=config.layer_norm_eps)
+            # self.bert_att_layer = BertLayer(config)
+            from transformers.configuration_bert import BertConfig
+            self.bert_att_config = BertConfig(hidden_size=self.bert_att_hidden_size, num_attention_heads=1, num_hidden_layers=1)
+            self.bert_att_layer = BertAttention(self.bert_att_config)
             self.srl_tag_nums = config.srl_tag_nums
-            self.qa_outputs = nn.Linear(config.hidden_size * self.srl_tag_nums, config.num_labels)
+            self.qa_outputs = nn.Linear(config.hidden_size * 2, config.num_labels)
 
         self.init_weights()
 
@@ -1294,6 +1304,7 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             sequence_output = torch.cat((sequence_output, srl_outputs), dim=2)
         elif self.srl_fusion_style == 'bert_srl_att':
             srl_att_sequence_output = []
+            sequence_output_projection = self.bert_projection_layernorm(self.bert_projection_dropout(self.bert_projection(sequence_output)))
             for channel in range(self.srl_tag_nums):
                 srl_ids_part = srl_ids[:, :, channel].contiguous()
                 attention_mask0 = (srl_ids_part == 0).to(torch.long)
@@ -1303,9 +1314,9 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
                 extended_attention_mask = extended_attention_mask.to(
                     dtype=next(self.parameters()).dtype)
                 extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-                bert_att_output = self.bert_att_layer(sequence_output, extended_attention_mask)
+                bert_att_output = self.bert_att_layer(sequence_output_projection, extended_attention_mask)
                 srl_att_sequence_output.append(bert_att_output[0])
-            sequence_output = torch.stack(srl_att_sequence_output, dim=2).view(batch_size, seq_leng, -1)
+            sequence_output = torch.cat((sequence_output, torch.stack(srl_att_sequence_output, dim=2).view(batch_size, seq_leng, -1)), dim=2)
 
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)
