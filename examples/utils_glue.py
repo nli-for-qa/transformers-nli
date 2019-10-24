@@ -16,7 +16,7 @@
 """ BERT classification fine-tuning: utilities to work with GLUE tasks """
 
 from __future__ import absolute_import, division, print_function
-
+import random
 import csv
 import json
 import logging
@@ -97,6 +97,49 @@ class DataProcessor(object):
                 lines.append(json.loads(line.strip('\n')))
             return lines
 
+    @classmethod
+    def _read_nq_json_para(cls,input_file):
+        with open(input_file,'r',encoding='utf-8') as fin:
+            data = json.load(fin)['data']
+        lines=[]
+        for article in data:
+            for paragraph in article['paragraphs']:
+                context = paragraph['context']
+                question = paragraph['qas'][0]['question']
+                id_ = paragraph['qas'][0]['id']
+                for sent_span,sent_label,keep_label in zip(paragraph['context_para'],
+                                                            paragraph['para_labels'],
+                                                            paragraph['keep_or_not']):
+                    line = {}
+                    line['sentence'] = context[sent_span[0]:sent_span[1]]
+                    line['question'] = question
+                    line['label'] = sent_label
+                    line['id'] = id_
+                    if keep_label:
+                        lines.append(line)
+        return lines
+
+    @classmethod
+    def _read_nq_json_sent(cls,input_file):
+        with open(input_file,'r',encoding='utf-8') as fin:
+            data = json.load(fin)['data']
+        lines=[]
+        for article in data:
+            for paragraph in article['paragraphs']:
+                context = paragraph['context']
+                question = paragraph['qas'][0]['question']
+                id_ = paragraph['qas'][0]['id']
+                for sent_span,sent_label,keep_label in zip(paragraph['context_sent'],
+                                                            paragraph['sent_labels'],
+                                                            paragraph['keep_or_not']):
+                    line = {}
+                    line['sentence'] = context[sent_span[0]:sent_span[1]] 
+                    line['question'] = question
+                    line['label'] = sent_label
+                    line['id'] = id_
+                    if keep_label:
+                        lines.append(line)
+        return lines
 
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
@@ -402,13 +445,26 @@ class SquadSentProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(
-            self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
-
+        if 'para' in data_dir:
+            return self._create_examples(
+                self._read_nq_json_para(os.path.join(data_dir, "train.json.sent")), "train")
+        elif 'sent' in data_dir:
+            return self._create_examples(
+                self._read_nq_json_sent(os.path.join(data_dir, "train.json.sent")), "train")
+        else:
+             return self._create_examples(
+                self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(
-            self._read_json(os.path.join(data_dir, "dev.json.sent")), "dev")
+        if 'para' in data_dir:
+            return self._create_examples(
+                self._read_nq_json_para(os.path.join(data_dir, "dev.json.sent")), "dev")
+        elif 'sent' in data_dir:
+            return self._create_examples(
+                self._read_nq_json_sent(os.path.join(data_dir, "dev.json.sent")), "dev")
+        else:
+            return self._create_examples(
+                self._read_json(os.path.join(data_dir, "dev.json.sent")), "dev")
 
     def get_labels(self):
         """See base class."""
