@@ -81,6 +81,10 @@ def train(args, train_dataset, model, tokenizer):
         args.num_train_epochs = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
     else:
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
+    if args.bert_without_grad:
+        for n, p in model.named_parameters():
+            if 'bert' in n:
+                p.requires_grad = False
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
@@ -133,6 +137,10 @@ def train(args, train_dataset, model, tokenizer):
                       'labels':         batch[3]}
             if args.model_type == 'bert-nq':
                 inputs.update({
+                    'input_ids': None,
+                    'attention_mask': None,
+                    'token_type_ids': None,
+                    # XLM and RoBERTa don't use segment_ids
                     'input_ids_a': batch[4],
                     'attention_mask_a': batch[5],
                     'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
@@ -424,6 +432,8 @@ def main():
                         help="For distributed training: local_rank")
     parser.add_argument('--server_ip', type=str, default='', help="For distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="For distant debugging.")
+    parser.add_argument('--bert_without_grad', action='store_true')
+    parser.add_argument('--att_on_bert', action='store_true')
     args = parser.parse_args()
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
@@ -474,6 +484,8 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+    if args.att_on_bert and args.model_type == 'bert-nq':
+        setattr(config, 'att_on_bert', True)
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 

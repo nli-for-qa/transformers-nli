@@ -441,6 +441,8 @@ class NqSentProcessor(DataProcessor):
                 text_a = line['question']
                 text_b = line['sentence']
                 label = line['label']
+                if label == '0' and random.random() < 0.7:
+                    continue
             except IndexError:
                 continue
             examples.append(
@@ -548,7 +550,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     label_map = {label : i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in tqdm.tqdm(enumerate(examples[:1000])):
+    for (ex_index, example) in tqdm.tqdm(enumerate(examples)):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
