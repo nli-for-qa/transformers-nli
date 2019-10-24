@@ -97,50 +97,6 @@ class DataProcessor(object):
                 lines.append(json.loads(line.strip('\n')))
             return lines
 
-    @classmethod
-    def _read_nq_json_para(cls,input_file):
-        with open(input_file,'r',encoding='utf-8') as fin:
-            data = json.load(fin)['data']
-        lines=[]
-        for article in data:
-            for paragraph in article['paragraphs']:
-                context = paragraph['context']
-                question = paragraph['qas'][0]['question']
-                id_ = paragraph['qas'][0]['id']
-                for sent_span,sent_label,keep_label in zip(paragraph['context_para'],
-                                                            paragraph['para_labels'],
-                                                            paragraph['keep_or_not']):
-                    line = {}
-                    line['sentence'] = context[sent_span[0]:sent_span[1]]
-                    line['question'] = question
-                    line['label'] = sent_label
-                    line['id'] = id_
-                    if keep_label:
-                        lines.append(line)
-        return lines
-
-    @classmethod
-    def _read_nq_json_sent(cls,input_file):
-        with open(input_file,'r',encoding='utf-8') as fin:
-            data = json.load(fin)['data']
-        lines=[]
-        for article in data:
-            for paragraph in article['paragraphs']:
-                context = paragraph['context']
-                question = paragraph['qas'][0]['question']
-                id_ = paragraph['qas'][0]['id']
-                for sent_span,sent_label,keep_label in zip(paragraph['context_sent'],
-                                                            paragraph['sent_labels'],
-                                                            paragraph['keep_or_not']):
-                    line = {}
-                    line['sentence'] = context[sent_span[0]:sent_span[1]] 
-                    line['question'] = question
-                    line['label'] = sent_label
-                    line['id'] = id_
-                    if keep_label:
-                        lines.append(line)
-        return lines
-
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
 
@@ -440,7 +396,7 @@ class WnliProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
-class SquadSentProcessor(DataProcessor):
+class NqSentProcessor(DataProcessor):
     """Processor for the QQP data set (GLUE version)."""
 
     def get_train_examples(self, data_dir):
@@ -452,8 +408,7 @@ class SquadSentProcessor(DataProcessor):
             return self._create_examples(
                 self._read_nq_json_sent(os.path.join(data_dir, "train.json.sent")), "train")
         else:
-             return self._create_examples(
-                self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
+            raise ValueError('wrong data dir!')
     def get_dev_examples(self, data_dir):
         """See base class."""
         if 'para' in data_dir:
@@ -463,7 +418,82 @@ class SquadSentProcessor(DataProcessor):
             return self._create_examples(
                 self._read_nq_json_sent(os.path.join(data_dir, "dev.json.sent")), "dev")
         else:
-            return self._create_examples(
+            raise ValueError('wrong data dir!')
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+
+        for (i, line) in tqdm.tqdm(enumerate(lines)):
+            guid = "%s-%s" % (set_type, line['id'])
+            try:
+                text_a = line['question']
+                text_b = line['sentence']
+                label = line['label']
+            except IndexError:
+                continue
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
+    @classmethod
+    def _read_nq_json_para(cls,input_file):
+        with open(input_file,'r',encoding='utf-8') as fin:
+            data = json.load(fin)['data']
+        lines=[]
+        for article in data:
+            for paragraph in article['paragraphs']:
+                context = paragraph['context']
+                question = paragraph['qas'][0]['question']
+                id_ = paragraph['qas'][0]['id']
+                for sent_span,sent_label,keep_label in zip(paragraph['context_para'],
+                                                            paragraph['para_labels'],
+                                                            paragraph['keep_or_not']):
+                    line = {}
+                    line['sentence'] = context[sent_span[0]:sent_span[1]]
+                    line['question'] = question
+                    line['label'] = sent_label
+                    line['id'] = id_
+                    if keep_label:
+                        lines.append(line)
+        return lines
+
+    @classmethod
+    def _read_nq_json_sent(cls,input_file):
+        with open(input_file,'r',encoding='utf-8') as fin:
+            data = json.load(fin)['data']
+        lines=[]
+        for article in data:
+            for paragraph in article['paragraphs']:
+                context = paragraph['context']
+                question = paragraph['qas'][0]['question']
+                id_ = paragraph['qas'][0]['id']
+                for sent_span,sent_label,keep_label in zip(paragraph['context_sent'],
+                                                            paragraph['sent_labels'],
+                                                            paragraph['keep_or_not']):
+                    line = {}
+                    line['sentence'] = context[sent_span[0]:sent_span[1]]
+                    line['question'] = question
+                    line['label'] = sent_label
+                    line['id'] = id_
+                    if keep_label:
+                        lines.append(line)
+        return lines
+
+class SquadSentProcessor(DataProcessor):
+    """Processor for the QQP data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+                self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
                 self._read_json(os.path.join(data_dir, "dev.json.sent")), "dev")
 
     def get_labels(self):
@@ -689,6 +719,8 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == 'squad_sent':
         return pre_recall_f1(preds, labels)
+    elif task_name == 'nq':
+        return pre_recall_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
@@ -704,6 +736,7 @@ processors = {
     "rte": RteProcessor,
     "wnli": WnliProcessor,
     'squad_sent': SquadSentProcessor,
+    'nq': NqSentProcessor,
 }
 
 output_modes = {
@@ -718,6 +751,7 @@ output_modes = {
     "rte": "classification",
     "wnli": "classification",
     'squad_sent': 'classification',
+    'nq': 'classification',
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -731,4 +765,5 @@ GLUE_TASKS_NUM_LABELS = {
     "rte": 2,
     "wnli": 2,
     'squad_sent': 2,
+    "nq":2,
 }
