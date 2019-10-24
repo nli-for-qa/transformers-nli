@@ -45,7 +45,7 @@ from pytorch_transformers import AdamW, WarmupLinearSchedule
 
 from utils_glue import (compute_metrics, convert_examples_to_features,
                         output_modes, processors)
-
+from mymodel import BertForSequenceClassificationNq
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, RobertaConfig)), ())
@@ -55,6 +55,7 @@ MODEL_CLASSES = {
     'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
+    'bert-nq': (BertConfig, BertForSequenceClassificationNq, BertTokenizer)
 }
 
 
@@ -130,6 +131,16 @@ def train(args, train_dataset, model, tokenizer):
                       'attention_mask': batch[1],
                       'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM and RoBERTa don't use segment_ids
                       'labels':         batch[3]}
+            if args.model_type == 'bert-nq':
+                inputs.update({
+                    'input_ids_a': batch[4],
+                    'attention_mask_a': batch[5],
+                    'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
+                    'input_ids_b': batch[7],
+                    'attention_mask_b': batch[8],
+                    'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet'] else None,
+                    # XLM and RoBERTa don't use segment_ids
+                })
             outputs = model(**inputs)
             loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
 
@@ -220,6 +231,16 @@ def evaluate(args, model, tokenizer, prefix=""):
                           'attention_mask': batch[1],
                           'token_type_ids': batch[2] if args.model_type in ['bert', 'xlnet'] else None,  # XLM and RoBERTa don't use segment_ids
                           'labels':         batch[3]}
+                if args.model_type == 'bert-nq':
+                    inputs.update({
+                        'input_ids_a': batch[4],
+                        'attention_mask_a': batch[5],
+                        'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
+                        'input_ids_b': batch[7],
+                        'attention_mask_b': batch[8],
+                        'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet'] else None,
+                        # XLM and RoBERTa don't use segment_ids
+                    })
                 outputs = model(**inputs)
                 tmp_eval_loss, logits = outputs[:2]
 
@@ -271,7 +292,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task)))
-    if os.path.exists(cached_features_file):
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:
@@ -302,12 +323,25 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
     all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
+    if args.model_type == 'bert-nq':
+        all_input_ids_a = torch.tensor([f.input_ids_a for f in features], dtype=torch.long)
+        all_input_mask_a = torch.tensor([f.input_mask_a for f in features], dtype=torch.long)
+        all_segment_ids_a = torch.tensor([f.segment_ids_a for f in features], dtype=torch.long)
+
+        all_input_ids_b = torch.tensor([f.input_ids_b for f in features], dtype=torch.long)
+        all_input_mask_b = torch.tensor([f.input_mask_b for f in features], dtype=torch.long)
+        all_segment_ids_b = torch.tensor([f.segment_ids_b for f in features], dtype=torch.long)
     if output_mode == "classification":
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
     elif output_mode == "regression":
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
 
-    dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
+    if args.model_type == 'bert-nq':
+        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+                                all_input_ids_a, all_input_mask_a, all_segment_ids_a,
+                                all_input_ids_b, all_input_mask_b, all_segment_ids_b)
+    else:
+        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
     return dataset
 
 

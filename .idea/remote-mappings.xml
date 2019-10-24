@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteMappingsManager">
+    <list>
+      <list>
+        <remote-mappings server-id="python@sftp://FAREAST.t-pinie@GCRAZGDL466.redmond.corp.microsoft.com:22/home/t-pinie/.conda/envs/nieping/bin/python">
+          <settings>
+            <list>
+              <mapping local-root="$PROJECT_DIR$" remote-root="/mnt/nieping/pytorch-transformers" />
+            </list>
+          </settings>
+        </remote-mappings>
+        <remote-mappings server-id="python@sftp://t-pinie@azure-eastus-p40-2-worker-vvsomb.eastus.cloudapp.azure.com:44143/usr/bin/python">
+          <settings>
+            <list>
+              <mapping local-root="$PROJECT_DIR$" remote-root="/home/t-pinie/pytorch-transformers" />
+            </list>
+          </settings>
+        </remote-mappings>
+        <remote-mappings server-id="python@sftp://t-pinie@azure-eastus-p40-2-worker-gevsdv.eastus.cloudapp.azure.com:44150/usr/bin/python">
+          <settings>
+            <list>
+              <mapping local-root="$PROJECT_DIR$" remote-root="/home/t-pinie/pytorch-transformers" />
+            </list>
+          </settings>
+        </remote-mappings>
+      </list>
+    </list>
+  </component>
+</project>
