@@ -1200,9 +1200,9 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
         super(BertForQuestionAnsweringSrl, self).__init__(config)
         self.srl_fusion_style = config.srl_fusion_style
         self.num_labels = config.num_labels
-        from transformers.tokenization_bert import BertTokenizer
-        self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-        self.srl_label_vocab = config.srl_label_vocab
+        # from transformers.tokenization_bert import BertTokenizer
+        #  self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        # self.srl_label_vocab = config.srl_label_vocab
         if self.srl_fusion_style == 'bert_emb_late':
             self.srl_emb_size = config.srl_emb_size
             self.srl_vocab_size = config.srl_vocab_size
