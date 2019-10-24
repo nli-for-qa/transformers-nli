@@ -434,6 +434,7 @@ def main():
     parser.add_argument('--server_port', type=str, default='', help="For distant debugging.")
     parser.add_argument('--bert_without_grad', action='store_true')
     parser.add_argument('--att_on_bert', action='store_true')
+    parser.add_argument('--att_num_layers', default=1, type=int)
     args = parser.parse_args()
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
@@ -486,6 +487,7 @@ def main():
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
     if args.att_on_bert and args.model_type == 'bert-nq':
         setattr(config, 'att_on_bert', True)
+        setattr(config, 'att_num_layers', args.att_num_layers)
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 
