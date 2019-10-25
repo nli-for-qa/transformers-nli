@@ -434,17 +434,17 @@ class NqSentProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
-
         for (i, line) in tqdm.tqdm(enumerate(lines)):
             guid = "%s-%s" % (set_type, line['id'])
             try:
                 text_a = line['question']
                 text_b = line['sentence']
                 label = line['label']
-                if label == '0' and random.random() < 0.7:
+                if set_type == 'train' and label == '0' and random.random() < 0.8:
                     continue
             except IndexError:
                 continue
+            # if (label == '0' and i in [11, 55, 82, 145, 192, 235, 295]) or label == '1':
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples

@@ -70,7 +70,7 @@ def set_seed(args):
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        tb_writer = SummaryWriter(comment=args.task_name + "_" + args.model_type)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -176,10 +176,12 @@ def train(args, train_dataset, model, tokenizer):
                     # Log metrics
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer)
-                        for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                        # for key, value in results.items():
+                        #     # print(key, value, global_step)
+                        #     tb_writer.add_scalar('eval_{}'.format(key), value[1] if type(value) is list else value, global_step)
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                    logger.info('average loss: {}, global step: {}'.format((tr_loss - logging_loss)/args.logging_steps), global_step)
                     logging_loss = tr_loss
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -269,6 +271,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             preds = np.squeeze(preds)
         result = compute_metrics(eval_task, preds, out_label_ids)
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
+        logger.info('eval loss: {}'.format(eval_loss))
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(prefix))
             for key in sorted(result.keys()):
