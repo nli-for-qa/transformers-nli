@@ -46,10 +46,10 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 
 from transformers import AdamW, WarmupLinearSchedule
 
-from transformers import glue_compute_metrics as compute_metrics
-from transformers import glue_output_modes as output_modes
-from transformers import glue_processors as processors
-from transformers import glue_convert_examples_to_features as convert_examples_to_features
+from utils_glue import compute_metrics
+from utils_glue import output_modes
+from utils_glue import processors
+from utils_glue import convert_examples_to_features
 
 logger = logging.getLogger(__name__)
 
