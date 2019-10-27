@@ -182,7 +182,7 @@ def train(args, train_dataset, model, tokenizer):
                         #     tb_writer.add_scalar('eval_{}'.format(key), value[1] if type(value) is list else value, global_step)
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
-                    logger.info('average loss: {}, global step: {}'.format((tr_loss - logging_loss)/args.logging_steps), global_step)
+                    logger.info('average loss: {}, global step: {}'.format((tr_loss - logging_loss)/args.logging_steps, global_step))
                     logging_loss = tr_loss
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
