@@ -1160,42 +1160,6 @@ class BertForQuestionAnswering(BertPreTrainedModel):
     the hidden-states output to compute `span start logits` and `span end logits`). """,
     BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
 class BertForQuestionAnsweringSrl(BertPreTrainedModel):
-    r"""
-        **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
-            Labels for position (index) of the start of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (`sequence_length`).
-            Position outside of the sequence are not taken into account for computing the loss.
-        **end_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
-            Labels for position (index) of the end of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (`sequence_length`).
-            Position outside of the sequence are not taken into account for computing the loss.
-
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
-            Total span extraction loss is the sum of a Cross-Entropy for the start and end positions.
-        **start_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
-            Span-start scores (before SoftMax).
-        **end_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
-            Span-end scores (before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = BertForQuestionAnswering.from_pretrained('bert-base-uncased')
-        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
-        start_positions = torch.tensor([1])
-        end_positions = torch.tensor([3])
-        outputs = model(input_ids, start_positions=start_positions, end_positions=end_positions)
-        loss, start_scores, end_scores = outputs[:2]
-
-    """
     def __init__(self, config, *inputs, **kwargs):
         super(BertForQuestionAnsweringSrl, self).__init__(config)
         self.srl_fusion_style = config.srl_fusion_style
@@ -1342,3 +1306,152 @@ class BertForQuestionAnsweringSrl(BertPreTrainedModel):
             outputs = (total_loss,) + outputs
 
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
+
+class BertForSequenceClassificationSrl(BertPreTrainedModel):
+    def __init__(self, config):
+        super(BertForSequenceClassificationSrl, self).__init__(config)
+        self.num_labels = config.num_labels
+
+        # self.bert = BertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        # self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
+
+        self.srl_fusion_style = config.srl_fusion_style
+        self.num_labels = config.num_labels
+        # from transformers.tokenization_bert import BertTokenizer
+        #  self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        # self.srl_label_vocab = config.srl_label_vocab
+        if self.srl_fusion_style == 'bert_emb_late':
+            self.srl_emb_size = config.srl_emb_size
+            self.srl_vocab_size = config.srl_vocab_size
+            self.srl_tag_nums = config.srl_tag_nums
+            self.bert = BertModel(config)
+            assert self.srl_vocab_size > 0
+            self.srl_embedding = nn.Embedding(self.srl_vocab_size, self.srl_emb_size, padding_idx=0)
+            self.srl_layer_normal = BertLayerNorm(self.srl_emb_size, eps=config.layer_norm_eps)
+            self.srl_emb_dropout = nn.Dropout(0.2)
+            self.srl_activation = nn.Tanh()
+            self.srl_projection = nn.Linear(self.srl_emb_size, self.srl_emb_size)
+            self.classifier = nn.Linear(config.hidden_size + (self.srl_emb_size * self.srl_tag_nums), config.num_labels)
+        elif self.srl_fusion_style == 'bert_emb_early':
+            self.bert = BertModel(config)
+            self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        elif self.srl_fusion_style == 'bert_att_late':
+            #bert + (bert srl att attention)
+            self.srl_tag_nums = config.srl_tag_nums
+            self.bert = BertModel(config)
+            self.bert_srl = BertModel(config)
+            # self.bert_srl_dropout = nn.Dropout(0.2)
+            # self.bert_srl_projection = nn.Linear(config.hidden_size * self.srl_tag_nums, config.hidden_size)
+            self.classifier = nn.Linear(config.hidden_size + config.hidden_size * self.srl_tag_nums, config.num_labels)
+        elif self.srl_fusion_style == 'bert_srl_concat':
+            self.bert = BertModel(config)
+            logger.info('logging srl model from: {}'.format(config.bert_srl_model_path))
+            self.bert_srl = BertModel.from_pretrained(config.bert_srl_model_path)
+            self.bert_srl_dropout = nn.Dropout(p=0.2)
+            self.classifier = nn.Linear(config.hidden_size + config.hidden_size, config.num_labels)
+        elif self.srl_fusion_style == 'bert_srl_att':
+            self.bert = BertModel(config)
+            self.bert_att_hidden_size = config.hidden_size // config.srl_tag_nums
+            self.bert_projection = nn.Linear(config.hidden_size, self.bert_att_hidden_size)
+            self.bert_projection_dropout = nn.Dropout(p=0.1)
+            self.bert_projection_layernorm = BertLayerNorm(self.bert_att_hidden_size, eps=config.layer_norm_eps)
+            # self.bert_att_layer = BertLayer(config)
+            from transformers.configuration_bert import BertConfig
+            self.bert_att_config = BertConfig(hidden_size=self.bert_att_hidden_size, num_attention_heads=1, num_hidden_layers=1)
+            self.bert_att_layer = BertAttention(self.bert_att_config)
+            self.srl_tag_nums = config.srl_tag_nums
+            self.classifier = nn.Linear(config.hidden_size * 2, config.num_labels)
+
+        self.pooler = BertPooler(config)
+        self.init_weights()
+
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None,
+                position_ids=None, head_mask=None, labels=None, srl_ids=None):
+
+        outputs = self.bert(input_ids,
+                            attention_mask=attention_mask,
+                            token_type_ids=token_type_ids,
+                            position_ids=position_ids,
+                            head_mask=head_mask)
+        sequence_output = outputs[0]
+        batch_size, seq_leng, bert_emb = tuple(sequence_output.size())
+        if self.srl_fusion_style == 'bert_emb_late':
+            srl_embedding = self.srl_embedding(srl_ids)
+            # srl_embedding = self.srl_layer_normal(srl_embedding)
+            srl_embedding = self.srl_emb_dropout(srl_embedding)
+            srl_embedding = self.srl_activation(srl_embedding)
+            srl_embedding = self.srl_projection(srl_embedding)
+            srl_embedding = self.srl_emb_dropout(srl_embedding)
+            srl_embedding = srl_embedding.view(batch_size, -1, self.srl_tag_nums * self.srl_emb_size)
+            sequence_output = torch.cat((sequence_output, srl_embedding), dim=2)
+        elif self.srl_fusion_style == 'bert_att_late':
+            srl_sequence_output = []
+            for channel in range(self.srl_tag_nums):
+                srl_ids_part = srl_ids[:,:,channel].contiguous()
+                attention_mask0 = (srl_ids_part == 0).to(torch.long)
+                attention_mask1 = (srl_ids_part == 1).to(torch.long)
+                attention_mask = (1 - (attention_mask0 + attention_mask1)).to(torch.long)
+                srl_outputs = self.bert_srl(input_ids,
+                                    attention_mask=attention_mask,
+                                    token_type_ids=token_type_ids,
+                                    position_ids=position_ids,
+                                    head_mask=head_mask,
+                                    srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
+                # srl_outputs = self.bert_srl_dropout(srl_outputs[0])
+                srl_outputs = srl_outputs[0]
+                srl_sequence_output.append(srl_outputs)
+            srl_sequence_output = torch.stack(srl_sequence_output, dim=2).view(batch_size, seq_leng, -1)
+            # srl_sequence_output = self.bert_srl_projection(srl_sequence_output)
+            # srl_sequence_output = self.bert_srl_dropout(srl_sequence_output)
+            sequence_output = torch.cat((sequence_output, srl_sequence_output), dim=2)
+        elif self.srl_fusion_style == 'bert_srl_concat':
+            token_type_ids5 = srl_ids.eq(5).to(torch.long) #B-V
+            token_type_ids22 = srl_ids.eq(22).to(torch.long) #I-V
+            token_type_ids = (token_type_ids5 + token_type_ids22).to(torch.long)
+            token_type_ids_new = (torch.sum(token_type_ids, dim=2) > 0).to(torch.long)
+            srl_outputs = self.bert_srl(input_ids,
+                                        attention_mask=attention_mask,
+                                        token_type_ids=token_type_ids_new,
+                                        position_ids=position_ids,
+                                        head_mask=head_mask,
+                                        srl_ids=srl_ids if self.srl_fusion_style == 'bert_emb_early' else None)
+            srl_outputs = srl_outputs[0]
+            srl_outputs = self.bert_srl_dropout(srl_outputs)
+            sequence_output = torch.cat((sequence_output, srl_outputs), dim=2)
+        elif self.srl_fusion_style == 'bert_srl_att':
+            srl_att_sequence_output = []
+            sequence_output_projection = self.bert_projection_layernorm(self.bert_projection_dropout(self.bert_projection(sequence_output)))
+            for channel in range(self.srl_tag_nums):
+                srl_ids_part = srl_ids[:, :, channel].contiguous()
+                attention_mask0 = (srl_ids_part == 0).to(torch.long)
+                attention_mask1 = (srl_ids_part == 1).to(torch.long)
+                attention_mask = (1 - (attention_mask0 + attention_mask1)).to(torch.long)
+                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+                extended_attention_mask = extended_attention_mask.to(
+                    dtype=next(self.parameters()).dtype)
+                extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+                bert_att_output = self.bert_att_layer(sequence_output_projection, extended_attention_mask)
+                srl_att_sequence_output.append(bert_att_output[0])
+            sequence_output = torch.cat((sequence_output, torch.stack(srl_att_sequence_output, dim=2).view(batch_size, seq_leng, -1)), dim=2)
+
+
+
+        pooled_output = self.pooler(sequence_output)
+
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            if self.num_labels == 1:
+                #  We are doing regression
+                loss_fct = MSELoss()
+                loss = loss_fct(logits.view(-1), labels.view(-1))
+            else:
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), logits, (hidden_states), (attentions)

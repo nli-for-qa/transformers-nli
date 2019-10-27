@@ -33,6 +33,7 @@ from tqdm import tqdm, trange
 
 from transformers import (WEIGHTS_NAME, BertConfig,
                                   BertForSequenceClassification, BertTokenizer,
+                                  BertForSequenceClassificationSrl,
                                   RobertaConfig,
                                   RobertaForSequenceClassification,
                                   RobertaTokenizer,
@@ -50,6 +51,7 @@ from utils_glue import compute_metrics
 from utils_glue import output_modes
 from utils_glue import processors
 from utils_glue import convert_examples_to_features
+from utils_squad_srl import SrlVocabEntry
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,7 @@ ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
+    'bert-srl': (BertConfig, BertForSequenceClassificationSrl, BertTokenizer),
     'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
@@ -75,7 +78,10 @@ def set_seed(args):
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        logger.info('tensorboard logs into {}'.format(
+            args.logdir if args.logdir else args.experiment_name + args.model_type + "_" + str(
+                args.srl_fusion_style) + "_" + str(args.train_file)))
+        tb_writer = SummaryWriter(log_dir=args.logdir, comment=args.experiment_name + args.model_type + "_" + str(args.srl_fusion_style) + "_" + str(args.train_file.split('/')[-1]))
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -88,6 +94,11 @@ def train(args, train_dataset, model, tokenizer):
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
+    if not args.bert_srl_with_grad:
+        logger.info('bert_srl without grad!')
+        for n, p in model.named_parameters():
+            if 'bert_srl' in n:
+                p.requires_grad = False
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
         {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
@@ -135,6 +146,8 @@ def train(args, train_dataset, model, tokenizer):
             inputs = {'input_ids':      batch[0],
                       'attention_mask': batch[1],
                       'labels':         batch[3]}
+            if args.srl_label_file:
+                inputs.update({'srl_ids': batch[7]})
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             outputs = model(**inputs)
@@ -193,14 +206,14 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix=""):
+def evaluate(args, model, tokenizer, prefix="", srl_label_vocab=None):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
     eval_outputs_dirs = (args.output_dir, args.output_dir + '-MM') if args.task_name == "mnli" else (args.output_dir,)
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, evaluate=True)
+        eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, evaluate=True, srl_label_vocab=srl_label_vocab)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -226,6 +239,8 @@ def evaluate(args, model, tokenizer, prefix=""):
                 inputs = {'input_ids':      batch[0],
                           'attention_mask': batch[1],
                           'labels':         batch[3]}
+                if args.srl_label_file:
+                    inputs.update({'srl_ids': batch[6]})
                 if args.model_type != 'distilbert':
                     inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
                 outputs = model(**inputs)
@@ -258,7 +273,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     return results
 
 
-def load_and_cache_examples(args, task, tokenizer, evaluate=False):
+def load_and_cache_examples(args, task, tokenizer, evaluate=False, srl_label_vocab=None):
     if args.local_rank not in [-1, 0] and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
@@ -288,7 +303,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
                                                 pad_on_left=bool(args.model_type in ['xlnet']),                 # pad on the left for xlnet
                                                 pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
                                                 pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
-        )
+                                                srl_label_vocab=srl_label_vocab,
+                                                srl_tag_nums=args.srl_tag_nums,
+                                                )
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
             torch.save(features, cached_features_file)
@@ -300,12 +317,15 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
     all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+    all_srl_ids = torch.tensor([f.srl_ids if f.srl_ids else 0 for f in features], dtype=torch.long)
     if output_mode == "classification":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
     elif output_mode == "regression":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
-
-    dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+    if srl_label_vocab:
+        dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels, all_srl_ids)
+    else:
+        dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
     return dataset
 
 
@@ -388,6 +408,14 @@ def main():
                         help="For distributed training: local_rank")
     parser.add_argument('--server_ip', type=str, default='', help="For distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="For distant debugging.")
+
+    parser.add_argument('--srl_label_file', default='', help='srl labels file')
+    parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
+    parser.add_argument('--srl_fusion_style', default='bert_srl_att', type=str)
+    parser.add_argument('--bert_srl_model_path', default='', type=str)
+    parser.add_argument('--bert_srl_with_grad', default=False, type=bool)
+    parser.add_argument('--logdir', default='', type=str)
+    parser.add_argument('--experiment_name', default='', type=str)
     args = parser.parse_args()
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
@@ -421,6 +449,9 @@ def main():
 
     # Set seed
     set_seed(args)
+    srl_label_vocab = None
+    if args.srl_label_file:
+        srl_label_vocab = SrlVocabEntry.from_corpus(args.srl_label_file)
 
     # Prepare GLUE task
     args.task_name = args.task_name.lower()
@@ -438,6 +469,19 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+    if args.model_type == 'bert-srl':
+        setattr(config, 'srl_fusion_style', args.srl_fusion_style)
+        setattr(config, 'srl_tag_nums', args.srl_tag_nums)
+        setattr(config, 'srl_label_vocab', srl_label_vocab)
+    if args.srl_fusion_style == 'bert_srl_concat':
+        assert args.bert_srl_model_path != ''
+        setattr(config, 'bert_srl_model_path', args.bert_srl_model_path)
+    if srl_label_vocab and not args.bert_srl_model_path:
+        setattr(config, 'srl_emb_size', 64)
+        if args.srl_fusion_style == 'bert_emb_early':
+            setattr(config, 'srl_emb_size', config.hidden_size // config.srl_tag_nums)
+            logger.info('we need config.srl_emb_size * config.srl_tag_nums == config.hidden_size')
+            assert config.srl_emb_size * config.srl_tag_nums == config.hidden_size
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 
@@ -451,7 +495,7 @@ def main():
 
     # Training
     if args.do_train:
-        train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False)
+        train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False, srl_label_vocab=srl_label_vocab)
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
@@ -491,7 +535,7 @@ def main():
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            result = evaluate(args, model, tokenizer, prefix=global_step)
+            result = evaluate(args, model, tokenizer, prefix=global_step, srl_label_vocab=srl_label_vocab)
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 

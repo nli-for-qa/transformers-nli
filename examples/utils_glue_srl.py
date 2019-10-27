@@ -27,7 +27,7 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
 
 logger = logging.getLogger(__name__)
-
+from utils_squad_srl import convert2srl_sent
 
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
@@ -53,11 +53,12 @@ class InputExample(object):
 class InputFeatures(object):
     """A single set of features of data."""
 
-    def __init__(self, input_ids, input_mask, segment_ids, label_id):
+    def __init__(self, input_ids, input_mask, segment_ids, label_id, srl_ids=None):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
         self.label_id = label_id
+        self.srl_ids = srl_ids
 
 
 class DataProcessor(object):
@@ -442,7 +443,9 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
                                  pad_token_segment_id=0,
                                  sequence_a_segment_id=0, 
                                  sequence_b_segment_id=1,
-                                 mask_padding_with_zero=True):
+                                 mask_padding_with_zero=True,
+                                 srl_label_vocab=None,
+                                 srl_tag_nums=3):
     """ Loads a data file into a list of `InputBatch`s
         `cls_token_at_end` define the location of the CLS token:
             - False (Default, BERT/XLM pattern): [CLS] + A + [SEP] + B + [SEP]
@@ -458,10 +461,40 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
         tokens_a = tokenizer.tokenize(example.text_a)
+        if srl_label_vocab:
+            tokens_a_srls = convert2srl_sent(example.text_a, srl_tag_nums=srl_tag_nums)
+            tokens_a_verbs = [len(srl['verbs']) for srl in tokens_a_srls]
+            tokens_a_verbs_sum =sum(tokens_a_verbs)
+            assert len(tokens_a_srls) >= 1
+            if tokens_a_verbs_sum:
+                tokens_a_wordpieces_labels = [[wp, wpls] for srl in tokens_a_srls for wp, wpls in zip(srl['wordpieces'], srl['wordpiece_tags']) if wp != '[CLS]' and wp != '[SEP]']
+                tokens_a = [srl[0] for srl in tokens_a_wordpieces_labels]
+                srl_tokens_a_labels = [srl[1] for srl in tokens_a_wordpieces_labels]
+                srl_tokens_a_wordpieces = [srl[0] for srl in tokens_a_wordpieces_labels]
+            else:
+                srl_tokens_a_labels = [['O' for _ in range(srl_tag_nums)] for _ in tokens_a]
+                srl_tokens_a_wordpieces = tokens_a
 
         tokens_b = None
         if example.text_b:
             tokens_b = tokenizer.tokenize(example.text_b)
+            if srl_label_vocab:
+                tokens_b_srls = convert2srl_sent(example.text_b, srl_tag_nums=srl_tag_nums)
+                tokens_b_verbs = [len(srl['verbs']) for srl in tokens_b_srls]
+                tokens_b_verbs_sum = sum(tokens_b_verbs)
+                assert len(tokens_b_srls) >= 1
+                if tokens_b_verbs_sum:
+                    tokens_b_wordpieces_labels = [[wp, wpls] for srl in tokens_b_srls for wp, wpls in
+                                                  zip(srl['wordpieces'], srl['wordpiece_tags']) if
+                                                  wp != '[CLS]' and wp != '[SEP]']
+                    tokens_b = [srl[0] for srl in tokens_b_wordpieces_labels]
+                    srl_tokens_b_labels = [srl[1] for srl in tokens_b_wordpieces_labels]
+                    srl_tokens_b_wordpieces = [srl[0] for srl in tokens_b_wordpieces_labels]
+                else:
+                    srl_tokens_b_labels = [['O' for _ in range(srl_tag_nums)] for _ in tokens_b]
+                    srl_tokens_b_wordpieces = tokens_b
+
+
             # Modifies `tokens_a` and `tokens_b` in place so that the total
             # length is less than the specified length.
             # Account for [CLS], [SEP], [SEP] with "- 3". " -4" for RoBERTa.
@@ -492,24 +525,36 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
         # used as as the "sentence vector". Note that this only makes sense because
         # the entire model is fine-tuned.
         tokens = tokens_a + [sep_token]
+        if srl_label_vocab:
+            srl_tokens = srl_tokens_a_labels
+            srl_tokens.append(['O' for _ in range(srl_tag_nums)])
         if sep_token_extra:
             # roberta uses an extra separator b/w pairs of sentences
             tokens += [sep_token]
+            srl_tokens.append(['O' for _ in range(srl_tag_nums)])
         segment_ids = [sequence_a_segment_id] * len(tokens)
 
         if tokens_b:
             tokens += tokens_b + [sep_token]
             segment_ids += [sequence_b_segment_id] * (len(tokens_b) + 1)
 
+            if srl_label_vocab:
+                srl_tokens += srl_tokens_b_labels
+
         if cls_token_at_end:
             tokens = tokens + [cls_token]
             segment_ids = segment_ids + [cls_token_segment_id]
+            srl_tokens.append(['O' for _ in range(srl_tag_nums)])
         else:
             tokens = [cls_token] + tokens
             segment_ids = [cls_token_segment_id] + segment_ids
 
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            srl_tokens = [['O' for _ in range(srl_tag_nums)]] + srl_tokens
 
+        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+        if srl_label_vocab:
+            srl_ids = [[srl_label_vocab.word2id.get(srl) for srl in srls] for srls in srl_tokens]
+            assert len(input_ids) == len(srl_ids)
         # The mask has 1 for real tokens and 0 for padding tokens. Only real
         # tokens are attended to.
         input_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
@@ -518,13 +563,19 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
         padding_length = max_seq_length - len(input_ids)
         if pad_on_left:
             input_ids = ([pad_token] * padding_length) + input_ids
+            if srl_label_vocab:
+                srl_ids1 = ([[0 for _ in range(srl_tag_nums)]] * padding_length) + srl_ids
             input_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + input_mask
             segment_ids = ([pad_token_segment_id] * padding_length) + segment_ids
         else:
             input_ids = input_ids + ([pad_token] * padding_length)
+            if srl_label_vocab:
+                srl_ids = srl_ids + ([[0 for _ in range(srl_tag_nums)]] * padding_length)
             input_mask = input_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
             segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
 
+        if srl_label_vocab:
+            assert len(input_ids) == len(srl_ids1)
         assert len(input_ids) == max_seq_length
         assert len(input_mask) == max_seq_length
         assert len(segment_ids) == max_seq_length
@@ -550,7 +601,8 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
                 InputFeatures(input_ids=input_ids,
                               input_mask=input_mask,
                               segment_ids=segment_ids,
-                              label_id=label_id))
+                              label_id=label_id,
+                              srl_ids=srl_ids1 if srl_label_vocab else None))
     return features
 
 

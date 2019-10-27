@@ -370,6 +370,26 @@ def convert2srl(para, srl_tag_nums=3):
 
     return sentences
 
+def convert2srl_sent(sent, srl_tag_nums=3):
+    sentences = [{'sentence': sent}]
+    sentences_srl = predictor_srl.predict_batch_json(sentences)
+    for sent_index, sent_srl in enumerate(sentences_srl):
+        sent_srl['wordpiece_tags'] = []
+        sentences[sent_index].update(sent_srl)
+        for srl_index, srl_tags in enumerate(sent_srl['verbs']):
+            sentences[sent_index]['wordpiece_tags'].append(srl_tags['wordpiece_tags'])
+        if len(sentences[sent_index]['wordpiece_tags']) >= srl_tag_nums:
+            sentences[sent_index]['wordpiece_tags'] = sentences[sent_index]['wordpiece_tags'][:srl_tag_nums]
+        else:
+            attach_num = srl_tag_nums - len(sentences[sent_index]['wordpiece_tags'])
+            attach_tags = [['O' for _ in range(len(sentences[sent_index]['wordpieces']))] for _ in range(attach_num)]
+            sentences[sent_index]['wordpiece_tags'].extend(attach_tags)
+
+        sentence_tags_new = list(map(list, zip(*sentences[sent_index]['wordpiece_tags'])))
+        assert len(sentence_tags_new) == len(sentences[sent_index]['wordpieces'])
+        sentences[sent_index]['wordpiece_tags'] = sentence_tags_new
+    return sentences
+
 def convert_examples_to_features(examples, max_seq_length,
                                  tokenizer,
                                  doc_stride, max_query_length, is_training,
