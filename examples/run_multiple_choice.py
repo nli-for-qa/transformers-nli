@@ -276,6 +276,8 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+        with open(output_eval_file + ".jsonl", 'w') as fout:
+            json.dump({'label_ids': out_label_ids, 'preds': preds, 'pred_ids': preds_label}, fout)
     return results
 
 
