@@ -25,7 +25,7 @@ from io import open
 
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
-
+from tqdm import tqdm
 logger = logging.getLogger(__name__)
 from utils_squad_srl import convert2srl_sent
 
@@ -456,7 +456,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     label_map = {label : i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in enumerate(examples):
+    for (ex_index, example) in tqdm(enumerate(examples), desc='convert to features', total=len(examples)):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
@@ -500,6 +500,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             # Account for [CLS], [SEP], [SEP] with "- 3". " -4" for RoBERTa.
             special_tokens_count = 4 if sep_token_extra else 3
             _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - special_tokens_count)
+            _truncate_seq_pair(srl_tokens_a_labels, srl_tokens_b_labels, max_seq_length - special_tokens_count)
         else:
             # Account for [CLS] and [SEP] with "- 2" and with "- 3" for RoBERTa.
             special_tokens_count = 3 if sep_token_extra else 2
@@ -540,6 +541,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
 
             if srl_label_vocab:
                 srl_tokens += srl_tokens_b_labels
+                srl_tokens.append(['O' for _ in range(srl_tag_nums)])
 
         if cls_token_at_end:
             tokens = tokens + [cls_token]
@@ -575,7 +577,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
 
         if srl_label_vocab:
-            assert len(input_ids) == len(srl_ids1)
+            assert len(input_ids) == len(srl_ids)
         assert len(input_ids) == max_seq_length
         assert len(input_mask) == max_seq_length
         assert len(segment_ids) == max_seq_length
@@ -595,6 +597,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
             logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
             logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+            logger.info("srl_ids: %s" % " ".join([str(x) for x in srl_ids]))
             logger.info("label: %s (id = %d)" % (example.label, label_id))
 
         features.append(
@@ -602,7 +605,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
                               input_mask=input_mask,
                               segment_ids=segment_ids,
                               label_id=label_id,
-                              srl_ids=srl_ids1 if srl_label_vocab else None))
+                              srl_ids=srl_ids if srl_label_vocab else None))
     return features
 
 

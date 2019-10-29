@@ -47,10 +47,10 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 
 from transformers import AdamW, WarmupLinearSchedule
 
-from utils_glue import compute_metrics
-from utils_glue import output_modes
-from utils_glue import processors
-from utils_glue import convert_examples_to_features
+from utils_glue_srl import compute_metrics
+from utils_glue_srl import output_modes
+from utils_glue_srl import processors
+from utils_glue_srl import convert_examples_to_features
 from utils_squad_srl import SrlVocabEntry
 
 logger = logging.getLogger(__name__)
@@ -79,9 +79,8 @@ def train(args, train_dataset, model, tokenizer):
     """ Train the model """
     if args.local_rank in [-1, 0]:
         logger.info('tensorboard logs into {}'.format(
-            args.logdir if args.logdir else args.experiment_name + args.model_type + "_" + str(
-                args.srl_fusion_style) + "_" + str(args.train_file)))
-        tb_writer = SummaryWriter(log_dir=args.logdir, comment=args.experiment_name + args.model_type + "_" + str(args.srl_fusion_style) + "_" + str(args.train_file.split('/')[-1]))
+            args.logdir if args.logdir else args.experiment_name + args.model_type + "_" + str(args.srl_fusion_style)))
+        tb_writer = SummaryWriter(log_dir=args.logdir, comment=args.experiment_name + args.model_type + "_" + str(args.srl_fusion_style))
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -147,7 +146,7 @@ def train(args, train_dataset, model, tokenizer):
                       'attention_mask': batch[1],
                       'labels':         batch[3]}
             if args.srl_label_file:
-                inputs.update({'srl_ids': batch[7]})
+                inputs.update({'srl_ids': batch[4]})
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             outputs = model(**inputs)
@@ -240,7 +239,7 @@ def evaluate(args, model, tokenizer, prefix="", srl_label_vocab=None):
                           'attention_mask': batch[1],
                           'labels':         batch[3]}
                 if args.srl_label_file:
-                    inputs.update({'srl_ids': batch[6]})
+                    inputs.update({'srl_ids': batch[4]})
                 if args.model_type != 'distilbert':
                     inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
                 outputs = model(**inputs)
@@ -285,7 +284,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, srl_label_voc
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task)))
-    if os.path.exists(cached_features_file):
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:
@@ -295,17 +294,21 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, srl_label_voc
             # HACK(label indices are swapped in RoBERTa pretrained model)
             label_list[1], label_list[2] = label_list[2], label_list[1] 
         examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
-        features = convert_examples_to_features(examples,
-                                                tokenizer,
-                                                label_list=label_list,
-                                                max_length=args.max_seq_length,
-                                                output_mode=output_mode,
-                                                pad_on_left=bool(args.model_type in ['xlnet']),                 # pad on the left for xlnet
-                                                pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
-                                                pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
-                                                srl_label_vocab=srl_label_vocab,
-                                                srl_tag_nums=args.srl_tag_nums,
-                                                )
+        features = convert_examples_to_features(examples, label_list, args.max_seq_length,
+                                 tokenizer, output_mode,
+                                 cls_token_at_end=False,
+                                 cls_token='[CLS]',
+                                 cls_token_segment_id=1,
+                                 sep_token='[SEP]',
+                                 sep_token_extra=False,
+                                 pad_on_left=False,
+                                 pad_token=0,
+                                 pad_token_segment_id=0,
+                                 sequence_a_segment_id=0,
+                                 sequence_b_segment_id=1,
+                                 mask_padding_with_zero=True,
+                                 srl_label_vocab=srl_label_vocab,
+                                 srl_tag_nums=3)
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
             torch.save(features, cached_features_file)
@@ -315,13 +318,13 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, srl_label_voc
 
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+    all_attention_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
+    all_token_type_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
     all_srl_ids = torch.tensor([f.srl_ids if f.srl_ids else 0 for f in features], dtype=torch.long)
     if output_mode == "classification":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
+        all_labels = torch.tensor([f.label_id for f in features], dtype=torch.long)
     elif output_mode == "regression":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+        all_labels = torch.tensor([f.label_id for f in features], dtype=torch.float)
     if srl_label_vocab:
         dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels, all_srl_ids)
     else:
@@ -413,7 +416,7 @@ def main():
     parser.add_argument('--srl_tag_nums', default=3, type=int, help='srl tag nums.')
     parser.add_argument('--srl_fusion_style', default='bert_srl_att', type=str)
     parser.add_argument('--bert_srl_model_path', default='', type=str)
-    parser.add_argument('--bert_srl_with_grad', default=False, type=bool)
+    parser.add_argument('--bert_srl_with_grad', default=True, type=bool)
     parser.add_argument('--logdir', default='', type=str)
     parser.add_argument('--experiment_name', default='', type=str)
     args = parser.parse_args()
@@ -472,7 +475,7 @@ def main():
     if args.model_type == 'bert-srl':
         setattr(config, 'srl_fusion_style', args.srl_fusion_style)
         setattr(config, 'srl_tag_nums', args.srl_tag_nums)
-        setattr(config, 'srl_label_vocab', srl_label_vocab)
+        # setattr(config, 'srl_label_vocab', srl_label_vocab)
     if args.srl_fusion_style == 'bert_srl_concat':
         assert args.bert_srl_model_path != ''
         setattr(config, 'bert_srl_model_path', args.bert_srl_model_path)

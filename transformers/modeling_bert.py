@@ -1156,9 +1156,6 @@ class BertForQuestionAnswering(BertPreTrainedModel):
 
         return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
 
-@add_start_docstrings("""Bert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
-    the hidden-states output to compute `span start logits` and `span end logits`). """,
-    BERT_START_DOCSTRING, BERT_INPUTS_DOCSTRING)
 class BertForQuestionAnsweringSrl(BertPreTrainedModel):
     def __init__(self, config, *inputs, **kwargs):
         super(BertForQuestionAnsweringSrl, self).__init__(config)
@@ -1362,8 +1359,8 @@ class BertForSequenceClassificationSrl(BertPreTrainedModel):
             self.bert_att_layer = BertAttention(self.bert_att_config)
             self.srl_tag_nums = config.srl_tag_nums
             self.classifier = nn.Linear(config.hidden_size * 2, config.num_labels)
-
-        self.pooler = BertPooler(config)
+            self.bert_pool_config = BertConfig(hidden_size=config.hidden_size * 2)
+            self.pooler = BertPooler(self.bert_pool_config)
         self.init_weights()
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None,
