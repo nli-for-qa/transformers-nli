@@ -343,7 +343,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
                 # tokens_b += tokenizer.tokenize(ending)
 
             special_tokens_count = 4 if sep_token_extra else 3
-            _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - special_tokens_count)
+            tokens_a, tokens_b = _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - special_tokens_count)
 
             # The convention in BERT is:
             # (a) For sequence pairs:
@@ -438,15 +438,20 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     # length or only pop from context
     while True:
         total_length = len(tokens_a) + len(tokens_b)
-        if total_length <= max_length:
-            break
-        if len(tokens_a) > len(tokens_b):
-            tokens_a.pop()
-        else:
-            logger.info('Attention! you are removing from token_b (swag task is ok). '
-                        'If you are training ARC and RACE (you are poping question + options), '
-                        'you need to try to use a bigger max seq length!')
-            tokens_b.pop()
+        if len(tokens_b) > 128:
+            tokens_b = tokens_b[-128:]
+        truncate_length = len(tokens_a) + len(tokens_b) - max_length if len(tokens_a) + len(tokens_b) - max_length >= 0 else 0
+        tokens_a = tokens_a[truncate_length:]
+        return tokens_a, tokens_b
+        # if total_length <= max_length:
+        #     break
+        # if len(tokens_a) > len(tokens_b):
+        #     tokens_a.pop()
+        # else:
+        #     logger.info('Attention! you are removing from token_b (swag task is ok). '
+        #                 'If you are training ARC and RACE (you are poping question + options), '
+        #                 'you need to try to use a bigger max seq length!')
+        #     tokens_b.pop()
 
 
 processors = {
