@@ -277,7 +277,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
         with open(output_eval_file + ".jsonl", 'w') as fout:
-            json.dump({'label_ids': out_label_ids, 'preds': preds, 'pred_ids': preds_label}, fout)
+            json.dump({'label_ids': out_label_ids.tolist(), 'preds': preds.tolist(), 'pred_ids': preds_label.tolist()}, fout)
     return results
 
 
@@ -299,7 +299,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task)))
-    if os.path.exists(cached_features_file):
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:
