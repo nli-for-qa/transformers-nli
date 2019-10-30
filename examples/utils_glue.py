@@ -499,11 +499,11 @@ class SquadSentProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
+                self._read_json(os.path.join(data_dir, "train-v2.0.json.sent")), "train")
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "dev.json.sent")), "dev")
+                self._read_json(os.path.join(data_dir, "dev-v2.0.json.sent")), "dev")
 
     def get_labels(self):
         """See base class."""
