@@ -16,6 +16,7 @@
 """ GLUE processors and helpers """
 
 import logging
+import tqdm
 import os
 
 from .utils import DataProcessor, InputExample, InputFeatures
@@ -150,6 +151,13 @@ def glue_convert_examples_to_features(examples, tokenizer,
 
     return features
 
+    @classmethod
+    def _read_json(cls, input_file):
+        with open(input_file, 'r', encoding='utf-8') as fin:
+            lines = []
+            for line in fin.readlines():
+                lines.append(json.loads(line.strip('\n')))
+            return lines
 
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
@@ -536,6 +544,8 @@ glue_processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
+    'squad_sent': SquadSentProcessor,
+    'nq': NqSentProcessor,
 }
 
 glue_output_modes = {
@@ -549,4 +559,6 @@ glue_output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
+    'squad_sent': 'classification',
+    'nq': 'classification',
 }

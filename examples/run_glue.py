@@ -46,11 +46,9 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 
 from transformers import AdamW, WarmupLinearSchedule
 
-from transformers import glue_compute_metrics as compute_metrics
-from transformers import glue_output_modes as output_modes
-from transformers import glue_processors as processors
-from transformers import glue_convert_examples_to_features as convert_examples_to_features
-
+from utils_glue import (compute_metrics, convert_examples_to_features,
+                        output_modes, processors)
+from mymodel import BertForSequenceClassificationNq
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, RobertaConfig)), ())
@@ -61,6 +59,7 @@ MODEL_CLASSES = {
     'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
     'distilbert': (DistilBertConfig, DistilBertForSequenceClassification, DistilBertTokenizer)
+    'bert-nq': (BertConfig, BertForSequenceClassificationNq, BertTokenizer)
 }
 
 
@@ -75,7 +74,7 @@ def set_seed(args):
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        tb_writer = SummaryWriter(comment=args.task_name + "_" + args.model_type)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -86,6 +85,10 @@ def train(args, train_dataset, model, tokenizer):
         args.num_train_epochs = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
     else:
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
+    if args.bert_without_grad:
+        for n, p in model.named_parameters():
+            if 'bert' in n:
+                p.requires_grad = False
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
@@ -137,6 +140,20 @@ def train(args, train_dataset, model, tokenizer):
                       'labels':         batch[3]}
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+            if args.model_type == 'bert-nq':
+                inputs.update({
+                    'input_ids': None,
+                    'attention_mask': None,
+                    'token_type_ids': None,
+                    # XLM and RoBERTa don't use segment_ids
+                    'input_ids_a': batch[4],
+                    'attention_mask_a': batch[5],
+                    'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
+                    'input_ids_b': batch[7],
+                    'attention_mask_b': batch[8],
+                    'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet'] else None,
+                    # XLM and RoBERTa don't use segment_ids
+                })
             outputs = model(**inputs)
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -164,10 +181,12 @@ def train(args, train_dataset, model, tokenizer):
                     # Log metrics
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer)
-                        for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                        # for key, value in results.items():
+                        #     # print(key, value, global_step)
+                        #     tb_writer.add_scalar('eval_{}'.format(key), value[1] if type(value) is list else value, global_step)
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                    logger.info('average loss: {}, global step: {}'.format((tr_loss - logging_loss)/args.logging_steps, global_step))
                     logging_loss = tr_loss
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -228,6 +247,16 @@ def evaluate(args, model, tokenizer, prefix=""):
                           'labels':         batch[3]}
                 if args.model_type != 'distilbert':
                     inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                if args.model_type == 'bert-nq':
+                    inputs.update({
+                        'input_ids_a': batch[4],
+                        'attention_mask_a': batch[5],
+                        'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
+                        'input_ids_b': batch[7],
+                        'attention_mask_b': batch[8],
+                        'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet'] else None,
+                        # XLM and RoBERTa don't use segment_ids
+                    })
                 outputs = model(**inputs)
                 tmp_eval_loss, logits = outputs[:2]
 
@@ -241,20 +270,30 @@ def evaluate(args, model, tokenizer, prefix=""):
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
+        pred_logits = preds
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
         elif args.output_mode == "regression":
             preds = np.squeeze(preds)
         result = compute_metrics(eval_task, preds, out_label_ids)
-        results.update(result)
-
         output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
+        logger.info('eval loss: {}'.format(eval_loss))
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(prefix))
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
-
+        result['precision'] = result['precision'].tolist()
+        result['recall'] = result['recall'].tolist()
+        result['f1'] = result['f1'].tolist()
+        result['true_sum'] = result['true_sum'].tolist()
+        result['logits'] = pred_logits.tolist()
+        result['preds'] = preds.tolist()
+        result['labels'] = out_label_ids.tolist()
+        results.update(result)
+        with open(os.path.join(eval_output_dir, "eval_results.json"), 'w', encoding='utf-8') as fout:
+            import json
+            json.dump(results, fout)
     return results
 
 
@@ -270,7 +309,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
         str(task)))
-    if os.path.exists(cached_features_file):
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:
@@ -298,14 +337,27 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+    all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
+    all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
+    if args.model_type == 'bert-nq':
+        all_input_ids_a = torch.tensor([f.input_ids_a for f in features], dtype=torch.long)
+        all_input_mask_a = torch.tensor([f.input_mask_a for f in features], dtype=torch.long)
+        all_segment_ids_a = torch.tensor([f.segment_ids_a for f in features], dtype=torch.long)
+
+        all_input_ids_b = torch.tensor([f.input_ids_b for f in features], dtype=torch.long)
+        all_input_mask_b = torch.tensor([f.input_mask_b for f in features], dtype=torch.long)
+        all_segment_ids_b = torch.tensor([f.segment_ids_b for f in features], dtype=torch.long)
     if output_mode == "classification":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
     elif output_mode == "regression":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
 
-    dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+    if args.model_type == 'bert-nq':
+        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
+                                all_input_ids_a, all_input_mask_a, all_segment_ids_a,
+                                all_input_ids_b, all_input_mask_b, all_segment_ids_b)
+    else:
+        dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
     return dataset
 
 
@@ -388,6 +440,9 @@ def main():
                         help="For distributed training: local_rank")
     parser.add_argument('--server_ip', type=str, default='', help="For distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="For distant debugging.")
+    parser.add_argument('--bert_without_grad', action='store_true')
+    parser.add_argument('--att_on_bert', action='store_true')
+    parser.add_argument('--att_num_layers', default=1, type=int)
     args = parser.parse_args()
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
@@ -438,6 +493,9 @@ def main():
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
     config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
+    if args.att_on_bert and args.model_type == 'bert-nq':
+        setattr(config, 'att_on_bert', True)
+        setattr(config, 'att_num_layers', args.att_num_layers)
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
 
