@@ -16,13 +16,13 @@
 """ Finetuning the library models for question-answering on SQuAD (Bert, XLM, XLNet)."""
 
 from __future__ import absolute_import, division, print_function
-
+import pickle
 import argparse
 import logging
 import os
 import random
 import glob
-
+import json
 import numpy as np
 import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
@@ -45,12 +45,13 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 from transformers import AdamW, WarmupLinearSchedule
 
 from utils_squad import (read_squad_examples, convert_examples_to_features,
-                         RawResult, write_predictions,
+                         RawResult, write_predictions,write_nq_predictions,
                          RawResultExtended, write_predictions_extended)
 
 # The follwing import is the official SQuAD evaluation script (2.0).
 # You can remove it from the dependencies if you are using this script outside of the library
 # We've added it here for automated tests (see examples/test_examples.py file)
+from utlis_nq_eval import EVAL_OPTS_NQ, main as evaluate_on_nq
 from utils_squad_evaluate import EVAL_OPTS, main as evaluate_on_squad
 
 logger = logging.getLogger(__name__)
@@ -247,13 +248,25 @@ def evaluate(args, model, tokenizer, prefix=""):
                                    end_logits   = to_list(outputs[1][i]))
             all_results.append(result)
 
-    # Compute predictions
-    output_prediction_file = os.path.join(args.output_dir, "predictions_{}.json".format(prefix))
+    # # # Compute predictions
+    prefix = args.predict_file.split('/')[-1].split('_')[0]
+    output_prediction_file = os.path.join(args.output_dir, "predictions_{}_.json".format(prefix))
     output_nbest_file = os.path.join(args.output_dir, "nbest_predictions_{}.json".format(prefix))
     if args.version_2_with_negative:
         output_null_log_odds_file = os.path.join(args.output_dir, "null_odds_{}.json".format(prefix))
     else:
         output_null_log_odds_file = None
+
+    example_output_pk_file = os.path.join(args.output_dir, "examples_{}.pk".format(prefix))
+    feature_output_pk_file = os.path.join(args.output_dir, "features_{}.pk".format(prefix))
+    allresults_pk_file = os.path.join(args.output_dir, "allresults_{}.pk".format(prefix))
+    pickle.dump(examples,open(example_output_pk_file,"wb"))
+    pickle.dump(features,open(feature_output_pk_file,"wb"))
+    pickle.dump(all_results,open(allresults_pk_file,"wb"))
+    logger.info("  Saved all examples to {} ".format(example_output_pk_file))
+    logger.info("  Saved all features to {} ".format(feature_output_pk_file))
+    logger.info("  Saved all all_results to {} ".format(allresults_pk_file))
+
 
     if args.model_type in ['xlnet', 'xlm']:
         # XLNet uses a more complex post-processing procedure
@@ -263,16 +276,32 @@ def evaluate(args, model, tokenizer, prefix=""):
                         model.config.start_n_top, model.config.end_n_top,
                         args.version_2_with_negative, tokenizer, args.verbose_logging)
     else:
-        write_predictions(examples, features, all_results, args.n_best_size,
+        if args.task_name == "nq":
+            write_nq_predictions(examples, features, all_results, args.n_best_size,
                         args.max_answer_length, args.do_lower_case, output_prediction_file,
                         output_nbest_file, output_null_log_odds_file, args.verbose_logging,
-                        args.version_2_with_negative, args.null_score_diff_threshold, tokenizer, model_type=args.model_type)
+                        args.version_2_with_negative, args.null_score_diff_threshold,tokenizer, model_type=args.model_type)
+        else:
+            write_predictions(examples, features, all_results, args.n_best_size,
+                                 args.max_answer_length, args.do_lower_case, output_prediction_file,
+                                 output_nbest_file, output_null_log_odds_file, args.verbose_logging,
+                                 args.version_2_with_negative, args.null_score_diff_threshold,tokenizer, model_type=args.model_type)
+    print("LQ:finished, and writed to {}".format(output_prediction_file))
 
-    # Evaluate with the official SQuAD script
-    evaluate_options = EVAL_OPTS(data_file=args.predict_file,
-                                 pred_file=output_prediction_file,
-                                 na_prob_file=output_null_log_odds_file)
-    results = evaluate_on_squad(evaluate_options)
+    # Evaluate with the official NQ script
+    if args.task_name == "nq":
+        evaluate_options = EVAL_OPTS_NQ(gold_path = args.eval_gzip_dir,
+                                     pred_path=output_prediction_file)
+        results = evaluate_on_nq(evaluate_options)
+    elif args.task_name == "squad":
+        # Evaluate with the official SQuAD script
+        evaluate_options = EVAL_OPTS(data_file=args.predict_file,
+                                     pred_file=output_prediction_file,
+                                     na_prob_file=output_null_log_odds_file)
+        results = evaluate_on_squad(evaluate_options)
+    else:
+        print("Task name error")
+        return {}
     return results
 
 
@@ -291,9 +320,26 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
         features = torch.load(cached_features_file)
     else:
         logger.info("Creating features from dataset file at %s", input_file)
-        examples = read_squad_examples(input_file=input_file,
-                                                is_training=not evaluate,
-                                                version_2_with_negative=args.version_2_with_negative)
+        if args.use_squad_newsqa:
+            examples = read_squad_examples(input_file=input_file,
+                                            is_training=not evaluate,
+                                            version_2_with_negative=args.version_2_with_negative,
+                                            dataset_name=['squad','newsqa'],
+                                            squad_file_path=args.squad_file,
+                                            newsqa_file_path=args.newsqa_file)
+        else:
+            examples = read_squad_examples(input_file=input_file,
+                                                    is_training=not evaluate,
+                                                    version_2_with_negative=args.version_2_with_negative)
+        # if args.use_squad_newsqa:
+        #     newsqa_pos_examples = read_squad_examples(input_file = args.newsqa_file,
+        #                                               is_training=not evaluate,
+        #                                               version_2_with_negative=args.version_2_with_negative)
+        #     squad_pos_examples = read_squad_examples(input_file = args.squad_file,
+        #                                              is_training=not evaluate,
+        #                                              version_2_with_negative=args.version_2_with_negative)
+        #     examples = examples.extend([e for e in newsqa_pos_examples if not e.is_impossible])
+        #     examples = examples.extend([e for e in squad_pos_examples if not e.is_impossible])
         features = convert_examples_to_features(examples=examples,
                                                 tokenizer=tokenizer,
                                                 max_seq_length=args.max_seq_length,
@@ -440,7 +486,23 @@ def main():
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--nsp', type=float, default=1.0, help='negtive examples sample probability')
+
+    parser.add_argument('--use_squad_newsqa', action='store_true', help='add pos example of other datasets')
+    parser.add_argument('--newsqa_file', type=str, default='', help='newsqa file path not found')
+    parser.add_argument('--squad_file', type=str, default='', help='squad_file_path not found')
+
+    parser.add_argument("--eval_gzip_dir", default=None, type=str,
+                        help="NQ dev gzip's dir for predictions")#lqq added
+    parser.add_argument("--task_name",default="squad",required=True)
+
     args = parser.parse_args()
+
+    if args.use_squad_newsqa:
+        assert args.newsqa_file != ''
+        assert args.squad_file != ''
+
+    if args.task_name == "nq":
+        assert args.eval_gzip_dir != None
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
@@ -535,14 +597,12 @@ def main():
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-
             # Evaluate
+            print("LQ: eval {}".format(checkpoints))
             result = evaluate(args, model, tokenizer, prefix=global_step)
-
             result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
             results.update(result)
-
-    logger.info("Results: {}".format(results))
+            print(json.dumps(results, indent=2))
 
     return results
 
