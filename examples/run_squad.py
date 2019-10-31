@@ -1,19 +1,4 @@
 # coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-""" Finetuning the library models for question-answering on SQuAD (Bert, XLM, XLNet)."""
 
 from __future__ import absolute_import, division, print_function
 import pickle
@@ -48,9 +33,7 @@ from utils_squad import (read_squad_examples, convert_examples_to_features,
                          RawResult, write_predictions,write_nq_predictions,
                          RawResultExtended, write_predictions_extended)
 
-# The follwing import is the official SQuAD evaluation script (2.0).
-# You can remove it from the dependencies if you are using this script outside of the library
-# We've added it here for automated tests (see examples/test_examples.py file)
+
 from utlis_nq_eval import EVAL_OPTS_NQ, main as evaluate_on_nq
 from utils_squad_evaluate import EVAL_OPTS, main as evaluate_on_squad
 
@@ -92,7 +75,6 @@ def train(args, train_dataset, model, tokenizer):
     else:
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
-    # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
         {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
@@ -248,7 +230,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                                    end_logits   = to_list(outputs[1][i]))
             all_results.append(result)
 
-    # # # Compute predictions
+    # Compute predictions
     prefix = args.predict_file.split('/')[-1].split('_')[0]
     output_prediction_file = os.path.join(args.output_dir, "predictions_{}_.json".format(prefix))
     output_nbest_file = os.path.join(args.output_dir, "nbest_predictions_{}.json".format(prefix))
@@ -286,7 +268,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                                  args.max_answer_length, args.do_lower_case, output_prediction_file,
                                  output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                                  args.version_2_with_negative, args.null_score_diff_threshold,tokenizer, model_type=args.model_type)
-    print("LQ:finished, and writed to {}".format(output_prediction_file))
+    logger.info("LQ:finished, and writed to {}".format(output_prediction_file))
 
     # Evaluate with the official NQ script
     if args.task_name == "nq":
@@ -300,7 +282,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                                      na_prob_file=output_null_log_odds_file)
         results = evaluate_on_squad(evaluate_options)
     else:
-        print("Task name error")
+        logger.info("Task name error")
         return {}
     return results
 
@@ -331,15 +313,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
             examples = read_squad_examples(input_file=input_file,
                                                     is_training=not evaluate,
                                                     version_2_with_negative=args.version_2_with_negative)
-        # if args.use_squad_newsqa:
-        #     newsqa_pos_examples = read_squad_examples(input_file = args.newsqa_file,
-        #                                               is_training=not evaluate,
-        #                                               version_2_with_negative=args.version_2_with_negative)
-        #     squad_pos_examples = read_squad_examples(input_file = args.squad_file,
-        #                                              is_training=not evaluate,
-        #                                              version_2_with_negative=args.version_2_with_negative)
-        #     examples = examples.extend([e for e in newsqa_pos_examples if not e.is_impossible])
-        #     examples = examples.extend([e for e in squad_pos_examples if not e.is_impossible])
+
         features = convert_examples_to_features(examples=examples,
                                                 tokenizer=tokenizer,
                                                 max_seq_length=args.max_seq_length,
@@ -511,7 +485,7 @@ def main():
     if args.server_ip and args.server_port:
         # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
         import ptvsd
-        print("Waiting for debugger attach")
+        logger.info("Waiting for debugger attach")
         ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
@@ -598,11 +572,11 @@ def main():
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             # Evaluate
-            print("LQ: eval {}".format(checkpoints))
+            logger.info("LQ: eval {}".format(checkpoints))
             result = evaluate(args, model, tokenizer, prefix=global_step)
             result = dict((k + ('_{}'.format(global_step) if global_step else ''), v) for k, v in result.items())
             results.update(result)
-            print(json.dumps(results, indent=2))
+            logger.info(json.dumps(results, indent=2))
 
     return results
 
