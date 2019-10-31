@@ -544,8 +544,6 @@ glue_processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
-    'squad_sent': SquadSentProcessor,
-    'nq': NqSentProcessor,
 }
 
 glue_output_modes = {
@@ -559,6 +557,4 @@ glue_output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
-    'squad_sent': 'classification',
-    'nq': 'classification',
 }
