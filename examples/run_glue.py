@@ -249,6 +249,9 @@ def evaluate(args, model, tokenizer, prefix=""):
                     inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
                 if args.model_type == 'bert-nq':
                     inputs.update({
+                        'input_ids': None,
+                        'attention_mask': None,
+                        'token_type_ids': None,
                         'input_ids_a': batch[4],
                         'attention_mask_a': batch[5],
                         'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
@@ -349,9 +352,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         all_input_mask_b = torch.tensor([f.input_mask_b for f in features], dtype=torch.long)
         all_segment_ids_b = torch.tensor([f.segment_ids_b for f in features], dtype=torch.long)
     if output_mode == "classification":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
+        all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
     elif output_mode == "regression":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+        all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.float)
 
     if args.model_type == 'bert-nq':
         dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
