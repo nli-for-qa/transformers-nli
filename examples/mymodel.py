@@ -1,4 +1,4 @@
-from pytorch_transformers.modeling_bert import BertPreTrainedModel, BertModel, BertLayer, BertPooler, BertEncoder, BertConfig
+from transformers.modeling_bert import BertPreTrainedModel, BertModel, BertLayer, BertPooler, BertEncoder, BertConfig
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 import torch
