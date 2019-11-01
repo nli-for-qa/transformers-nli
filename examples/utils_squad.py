@@ -35,7 +35,7 @@ import random
 
 # Required by XLNet evaluation method to compute optimal threshold (see write_predictions_extended() method)
 from utils_squad_evaluate import find_all_best_thresh_v2, make_qid_to_has_ans, get_raw_scores
-import random
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,8 +49,6 @@ class SquadExample(object):
                  qas_id,
                  question_text,
                  doc_tokens,
-                 nq_context_map=None,#lq added
-                 nq_long_candidates=None,#lq added
                  orig_answer_text=None,
                  start_position=None,
                  end_position=None,
@@ -58,13 +56,10 @@ class SquadExample(object):
         self.qas_id = qas_id
         self.question_text = question_text
         self.doc_tokens = doc_tokens
-        self.nq_context_map = nq_context_map#lq added
-        self.nq_long_candidates = nq_long_candidates#lq added
         self.orig_answer_text = orig_answer_text
         self.start_position = start_position
         self.end_position = end_position
         self.is_impossible = is_impossible
-
 
     def __str__(self):
         return self.__repr__()
@@ -178,32 +173,19 @@ def paragraphs2examples(paragraph, is_training=False, version_2_with_negative=Fa
                 start_position = -1
                 end_position = -1
                 orig_answer_text = ""
-        if is_training:
-            example = SquadExample(
-                qas_id=qas_id,
-                question_text=question_text,
-                doc_tokens=doc_tokens,
-                orig_answer_text=orig_answer_text,
-                start_position=start_position,
-                end_position=end_position,
-                is_impossible=is_impossible)
-        else:
-            example = SquadExample(
-                        qas_id=qas_id,
-                        question_text=question_text,
-                        doc_tokens=doc_tokens,
-                        orig_answer_text=orig_answer_text,
-                        start_position=start_position,
-                        end_position=end_position,
-                        is_impossible=is_impossible,
-                        nq_context_map=paragraph.get("nq_context_map","is not nq data"),#lqq different
-                        nq_long_candidates =paragraph.get('nq_long_candidates', "is not nq data")#lqq different
-                    )
+
+        example = SquadExample(
+            qas_id=qas_id,
+            question_text=question_text,
+            doc_tokens=doc_tokens,
+            orig_answer_text=orig_answer_text,
+            start_position=start_position,
+            end_position=end_position,
+            is_impossible=is_impossible)
         paragraph_examples.append(example)
     return paragraph_examples
 
-def read_squad_examples(input_file, is_training, version_2_with_negative, dataset_name=None,
-                        squad_file_path=None,newsqa_file_path=None):
+def read_squad_examples(input_file, is_training, version_2_with_negative):
     """Read a SQuAD json file into a list of SquadExample."""
     with open(input_file, "r", encoding='utf-8') as reader:
         input_data = json.load(reader)["data"]
@@ -214,39 +196,6 @@ def read_squad_examples(input_file, is_training, version_2_with_negative, datase
         examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
                                      desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
     examples = [example for entry_examples in examples for example in entry_examples]
-
-    if dataset_name:
-        assert squad_file_path!=None
-        assert newsqa_file_path!=None
-        squad_examples = []
-        newsqa_examples = []
-        for dataset in dataset_name:
-            if dataset == 'squad':
-                logger.info('start convert squad examples!!!!')
-                with open(squad_file_path, "r", encoding='utf-8') as reader:
-                    input_data = json.load(reader)["data"]
-                paragraphs = [paragraph for entry in input_data for paragraph in entry['paragraphs']]
-                with Pool(Thread_num) as p:
-                    annotate = partial(paragraphs2examples, is_training=is_training,
-                                       version_2_with_negative=version_2_with_negative)
-                    squad_examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
-                                         desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
-                squad_examples = [example for entry_examples in squad_examples for example in entry_examples if not example.is_impossible]
-                logger.info('squad_examples_pos:',len(squad_examples))
-            elif dataset == 'newsqa':
-                with open(newsqa_file_path, "r", encoding='utf-8') as reader:
-                    input_data = json.load(reader)["data"]
-                paragraphs = [paragraph for entry in input_data for paragraph in entry['paragraphs']]
-                with Pool(Thread_num) as p:
-                    annotate = partial(paragraphs2examples, is_training=is_training,
-                                       version_2_with_negative=version_2_with_negative)
-                    newsqa_examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
-                                         desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
-                newsqa_examples = [example for entry_examples in newsqa_examples for example in entry_examples if not example.is_impossible]
-                logger.info('news_examples_pos:', len(newsqa_examples))
-        examples.extend(squad_examples)
-        examples.extend(newsqa_examples)
-    logger.info('all examples add squad and newsqa:',len(examples))
     return examples
 
 def example_to_feature(example, max_seq_length=384,
@@ -402,6 +351,11 @@ def example_to_feature(example, max_seq_length=384,
             segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
             p_mask = p_mask + ([1] * padding_length)
 
+        # while len(input_ids) < max_seq_length:
+        #     input_ids.append(pad_token)
+        #     input_mask.append(0 if mask_padding_with_zero else 1)
+        #     segment_ids.append(pad_token_segment_id)
+        #     p_mask.append(1)
 
         assert len(input_ids) == max_seq_length
         assert len(input_mask) == max_seq_length
@@ -453,7 +407,6 @@ def example_to_feature(example, max_seq_length=384,
                 is_impossible=span_is_impossible)
         )
     example_features_selected = []
-    #no_ans,has_ans = 0,0
     for example_feature in example_features:
         if is_training and example_feature.is_impossible and random.random() > negtive_sample_probability:
             continue
@@ -512,12 +465,15 @@ def convert_examples_to_features(examples, max_seq_length,
         if not example_features:
             logger.info('Attention: meet wrong example!')
         for feature in example_features:
+            # if feature.is_impossible:
+            #     if is_training and random.random() > negtive_sample_probability:
+            #         drop_negative_num += 1
+            #         continue
             feature.unique_id = unique_id
             unique_id += 1
             feature.example_index = example_index
             features.append(feature)
     logger.info('Is training: {} features num: {}, drop negative num: {}'.format(str(is_training), len(features), drop_negative_num))
-
     return features
 
 def convert_examples_to_features1(examples, max_seq_length,
@@ -537,10 +493,15 @@ def convert_examples_to_features1(examples, max_seq_length,
     """Loads a data file into a list of `InputBatch`s."""
 
     unique_id = 1000000000
+    # cnt_pos, cnt_neg = 0, 0
+    # max_N, max_M = 1024, 1024
+    # f = np.zeros((max_N, max_M), dtype=np.float32)
 
     features = []
     for (example_index, example) in tqdm(enumerate(examples)):
 
+        # if example_index % 100 == 0:
+        #     logger.info('Converting %s/%s pos %s neg %s', example_index, len(examples), cnt_pos, cnt_neg)
 
         query_tokens = tokenizer.tokenize(example.question_text)
 
@@ -712,7 +673,7 @@ def convert_examples_to_features1(examples, max_seq_length,
                 start_position = cls_index
                 end_position = cls_index
 
-            if example_index < 2:
+            if example_index < 20:
                 logger.info("*** Example ***")
                 logger.info("unique_id: %s" % (unique_id))
                 logger.info("example_index: %s" % (example_index))
@@ -1042,240 +1003,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
 
     return all_predictions
 
-def write_nq_predictions(all_examples, all_features, all_results, n_best_size,
-                      max_answer_length, do_lower_case, output_prediction_file,
-                      output_nbest_file, output_null_log_odds_file, verbose_logging,
-                      version_2_with_negative, null_score_diff_threshold,tokenizer, model_type="bert"):
-    """Write final predictions to the json file and log-odds of null if needed."""
-    logger.info("Writing predictions to: %s" % (output_prediction_file))
-    logger.info("Writing nbest to: %s" % (output_nbest_file))
 
-    example_index_to_features = collections.defaultdict(list)
-    for feature in all_features:
-        example_index_to_features[feature.example_index].append(feature)
-
-    unique_id_to_result = {}
-    for result in all_results:
-        unique_id_to_result[result.unique_id] = result
-
-    _PrelimPrediction = collections.namedtuple(  # pylint: disable=invalid-name
-        "PrelimPrediction",
-        ["feature_index", "start_index", "end_index", "start_logit", "end_logit"])
-
-    # all_predictions = collections.OrderedDict()
-    all_nq_predictions = []
-    # scores_diff_json = collections.OrderedDict()
-    all_nq_nbest_predictions ={}#lqq new add
-    for (example_index, example) in enumerate(all_examples):
-        features = example_index_to_features[example_index]
-
-        prelim_predictions = []
-        # keep track of the minimum score of null start+end of position 0
-        score_null = 1000000  # large and positive
-        min_null_feature_index = 0  # the paragraph slice with min null score
-        null_start_logit = 0  # the start logit at the slice with min null score
-        null_end_logit = 0  # the end logit at the slice with min null score
-        for (feature_index, feature) in enumerate(features):
-            result = unique_id_to_result[feature.unique_id]
-            start_indexes = _get_best_indexes(result.start_logits, n_best_size)
-            end_indexes = _get_best_indexes(result.end_logits, n_best_size)
-            # if we could have irrelevant answers, get the min score of irrelevant
-            if version_2_with_negative:
-                feature_null_score = result.start_logits[0] + result.end_logits[0]
-                if feature_null_score < score_null:
-                    score_null = feature_null_score
-                    min_null_feature_index = feature_index
-                    null_start_logit = result.start_logits[0]
-                    null_end_logit = result.end_logits[0]
-            for start_index in start_indexes:
-                for end_index in end_indexes:
-                    # We could hypothetically create invalid predictions, e.g., predict
-                    # that the start of the span is in the question. We throw out all
-                    # invalid predictions.
-                    if start_index >= len(feature.tokens):
-                        continue
-                    if end_index >= len(feature.tokens):
-                        continue
-                    if (start_index not in feature.token_to_orig_map) or (end_index not in feature.token_to_orig_map):
-                        continue
-                    else:
-                        nq_s_idx = example.nq_context_map[feature.token_to_orig_map[start_index]]
-                        nq_e_idx = example.nq_context_map[feature.token_to_orig_map[end_index]]
-                        if nq_s_idx <0:
-                            continue
-                        if nq_e_idx <0:
-                            continue
-                        if nq_e_idx < nq_s_idx:
-                            continue
-                    if not feature.token_is_max_context.get(start_index, False):
-                        continue
-                    if end_index < start_index:
-                        continue
-
-                    length = end_index - start_index + 1
-                    if length > max_answer_length:
-                        continue
-                    prelim_predictions.append(
-                        _PrelimPrediction(
-                            feature_index=feature_index,
-                            start_index=start_index,
-                            end_index=end_index,
-                            start_logit=result.start_logits[start_index],
-                            end_logit=result.end_logits[end_index]))
-        if version_2_with_negative:
-            prelim_predictions.append(
-                _PrelimPrediction(
-                    feature_index=min_null_feature_index,
-                    start_index=0,
-                    end_index=0,
-                    start_logit=null_start_logit,
-                    end_logit=null_end_logit))
-        prelim_predictions = sorted(
-            prelim_predictions,
-            key=lambda x: (x.start_logit + x.end_logit),
-            reverse=True)
-
-        _NbestPrediction = collections.namedtuple(  # pylint: disable=invalid-name
-            "NbestPrediction", ["text", "start_logit", "end_logit","start_nq_idx","end_nq_idx"])
-
-        seen_predictions = {}
-        nbest = []
-        for pred in prelim_predictions:
-            if len(nbest) >= n_best_size:
-                break
-            feature = features[pred.feature_index]
-            if pred.start_index > 0:  # this is a non-null prediction
-                tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
-                orig_doc_start = feature.token_to_orig_map[pred.start_index]
-                orig_doc_end = feature.token_to_orig_map[pred.end_index]
-                orig_tokens = example.doc_tokens[orig_doc_start:(orig_doc_end + 1)]
-                tok_text = " ".join(tok_tokens)
-
-                if model_type == 'roberta':
-                    tok_text = tokenizer.convert_tokens_to_string(tok_tokens)
-                    tok_text = " ".join(tok_text.strip().split())
-                    orig_text = " ".join(orig_tokens)
-                    final_text = get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
-                else:
-                    # De-tokenize WordPieces that have been split off.
-                    tok_text = tok_text.replace(" ##", "")
-                    tok_text = tok_text.replace("##", "")
-
-                    # Clean whitespace
-                    tok_text = tok_text.strip()
-                    tok_text = " ".join(tok_text.split())
-                    orig_text = " ".join(orig_tokens)
-
-                    final_text = get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
-
-                if final_text in seen_predictions:
-                    continue
-
-                seen_predictions[final_text] = True
-
-                nq_start = example.nq_context_map[orig_doc_start]  # lq_added
-                nq_end = example.nq_context_map[orig_doc_end]  # lq_added
-            else:
-                final_text = ""
-                seen_predictions[final_text] = True
-                nq_start = -1  # lq_added
-                nq_end = -1  # lq_added
-
-            nbest.append(
-                _NbestPrediction(
-                    text=final_text,
-                    start_logit=pred.start_logit,
-                    end_logit=pred.end_logit,
-                    start_nq_idx=nq_start,
-                    end_nq_idx=nq_end))
-        # if we didn't include the empty option in the n-best, include it
-        if version_2_with_negative:
-            if "" not in seen_predictions:
-                nbest.append(
-                    _NbestPrediction(
-                        text="",
-                        start_logit=null_start_logit,
-                        end_logit=null_end_logit,
-                        start_nq_idx=-1,
-                        end_nq_idx=-1
-                    ))
-
-            # In very rare edge cases we could only have single null prediction.
-            # So we just create a nonce prediction in this case to avoid failure.
-            if len(nbest) == 1:
-                nbest.insert(0,
-                             _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0, start_nq_idx=-1, end_nq_idx=-1))
-
-        # In very rare edge cases we could have no valid predictions. So we
-        # just create a nonce prediction in this case to avoid failure.
-        if not nbest:
-            nbest.append(
-                _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0, start_nq_idx=-1, end_nq_idx=-1))
-
-        assert len(nbest) >= 1
-        total_scores = []
-        best_non_null_entry = None
-        for entry in nbest:
-            total_scores.append(entry.start_logit + entry.end_logit)
-            if not best_non_null_entry:
-                if entry.text:
-                    best_non_null_entry = entry
-
-        probs = _compute_softmax(total_scores)
-
-        nbest_json = []
-        for (i, entry) in enumerate(nbest):
-            output = collections.OrderedDict()
-            output["text"] = entry.text
-            output["probability"] = probs[i]
-            output["start_logit"] = entry.start_logit
-            output["end_logit"] = entry.end_logit
-            output["start_nq_idx"] = entry.start_nq_idx#lq added
-            output["end_nq_idx"] = entry.end_nq_idx#lq added
-            output["score"] = entry.start_logit+entry.end_logit-score_null
-            nbest_json.append(output)
-
-        assert len(nbest_json) >= 1
-        all_nq_nbest_predictions[int(example.qas_id)] = nbest_json
-        if version_2_with_negative:
-            score_diff =  best_non_null_entry.start_logit+best_non_null_entry.end_logit -score_null#score is the cls.startlogits+cls.endlogits
-            short_start = best_non_null_entry.start_nq_idx
-            short_end = best_non_null_entry.end_nq_idx
-            long_start = -1
-            long_end = -1
-            for (candidate_long_s,candidate_long_e) in example.nq_long_candidates:
-                if candidate_long_s <= short_start and candidate_long_e >= short_end:
-                    long_start = candidate_long_s
-                    long_end = candidate_long_e
-                    break
-            all_nq_predictions.append({
-                "example_id": int(example.qas_id),
-                "long_answer": {
-                    "start_token": long_start,
-                    "end_token": long_end,
-                    "start_byte": -1,
-                    "end_byte": -1
-                },
-                "long_answer_score": score_diff,
-                "short_answers": [{
-                    "start_token": short_start,
-                    "end_token": short_end+1 if short_end != -1 else short_end,
-                    "start_byte": -1,
-                    "end_byte": -1
-                }],
-                "short_answers_score": score_diff,
-                "yes_no_answer": "NONE"
-            })
-
-
-    with open(output_nbest_file, "w") as writer:
-        writer.write(json.dumps(all_nq_nbest_predictions, indent=4) + "\n")
-
-    predictions_json = {"predictions": all_nq_predictions}
-    with open(output_prediction_file, "w") as writer:
-        writer.write(json.dumps(predictions_json, indent=4) + "\n")
-    return all_nq_predictions
-#--------------------------lqq end ---------------------------------------------------------
 # For XLNet (and XLM which uses the same head)
 RawResultExtended = collections.namedtuple("RawResultExtended",
     ["unique_id", "start_top_log_probs", "start_top_index",
