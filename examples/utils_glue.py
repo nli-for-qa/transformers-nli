@@ -525,6 +525,38 @@ class SquadSentProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+class SquadParaProcessor(DataProcessor):
+    """Processor for the QQP data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+                self._read_json(os.path.join(data_dir, " SQuAD-v1.1-train.txt.para")), "train")
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+                self._read_json(os.path.join(data_dir, " SQuAD-v1.1-dev.txt.para")), "dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+
+        for (i, line) in tqdm.tqdm(enumerate(lines)):
+            guid = "%s-%s" % (set_type, line['squad_id'])
+            try:
+                text_a = line['question']
+                text_b = line['document']
+                label = line['label']
+            except IndexError:
+                continue
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
+
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
@@ -787,6 +819,8 @@ def compute_metrics(task_name, preds, labels):
         return pre_recall_f1(preds, labels)
     elif task_name == 'nq':
         return pre_recall_f1(preds, labels)
+    elif task_name == 'squad_para':
+        return pre_recall_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
@@ -803,6 +837,7 @@ processors = {
     "wnli": WnliProcessor,
     'squad_sent': SquadSentProcessor,
     'nq': NqSentProcessor,
+    'squad_para': SquadParaProcessor,
 }
 
 output_modes = {
@@ -818,6 +853,7 @@ output_modes = {
     "wnli": "classification",
     'squad_sent': 'classification',
     'nq': 'classification',
+    'squad_para': 'classification',
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -832,4 +868,5 @@ GLUE_TASKS_NUM_LABELS = {
     "wnli": 2,
     'squad_sent': 2,
     "nq":2,
+    "squad_para": 2,
 }
