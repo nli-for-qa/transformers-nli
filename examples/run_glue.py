@@ -46,9 +46,9 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 
 from transformers import AdamW, WarmupLinearSchedule
 
-from .utils_glue import (compute_metrics, convert_examples_to_features,
+from utils_glue import (compute_metrics, convert_examples_to_features,
                         output_modes, processors)
-from .mymodel import BertForSequenceClassificationNq
+from mymodel import BertForSequenceClassificationNq
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, RobertaConfig)), ())
