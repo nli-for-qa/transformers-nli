@@ -546,7 +546,7 @@ class SquadParaProcessor(DataProcessor):
         examples = []
 
         for (i, line) in tqdm.tqdm(enumerate(lines)):
-            guid = "%s-%s" % (set_type, line['squad_qid'])
+            guid = "%s-%s" % (set_type, line.get('squad_id', None))
             try:
                 text_a = line['question']
                 text_b = line['document']
