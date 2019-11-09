@@ -20,7 +20,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             self.pooler = BertPooler(config)
             self.classifier = nn.Linear(config.hidden_size, self.num_labels)
         else:
-            self.classifier = nn.Linear(config.hidden_size * 3, self.config.num_labels)
+            self.classifier = nn.Linear(config.hidden_size * 2, self.config.num_labels)
 
         self.init_weights()
 
@@ -54,7 +54,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             pooled_output_a = self.dropout(pooled_output_a)
             pooled_output_b = outputs_b[1]
             pooled_output_b = self.dropout(pooled_output_b)
-            pooled_output = torch.cat((pooled_output_a, pooled_output_b, pooled_output_a - pooled_output_b), dim=1)
+            pooled_output = torch.cat((pooled_output_a, pooled_output_b), dim=1)
         logits = self.classifier(pooled_output)
 
         outputs = (logits,) + outputs_a[2:] + outputs_b[2:]  # add hidden states and attention if they are here
