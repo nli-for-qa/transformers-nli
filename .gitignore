@@ -133,3 +133,6 @@ examples/runs
 /data
 serialization_dir
 .idea/
+./idea/
+*.idea/
+
