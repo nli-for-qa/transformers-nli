@@ -551,6 +551,8 @@ class SquadParaProcessor(DataProcessor):
                 text_a = line['question']
                 text_b = line['document']
                 label = line['label']
+                if label == '0' and random.random() < 0.5 and set_type == 'train':
+                    continue
             except IndexError:
                 continue
             examples.append(

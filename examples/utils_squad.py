@@ -232,7 +232,7 @@ def read_squad_examples(input_file, is_training, version_2_with_negative, datase
                     squad_examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
                                          desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
                 squad_examples = [example for entry_examples in squad_examples for example in entry_examples if not example.is_impossible]
-                logger.info('squad_examples_pos:',len(squad_examples))
+                logger.info('squad_examples_pos:'.format(len(squad_examples)))
             elif dataset == 'newsqa':
                 with open(newsqa_file_path, "r", encoding='utf-8') as reader:
                     input_data = json.load(reader)["data"]
@@ -243,10 +243,10 @@ def read_squad_examples(input_file, is_training, version_2_with_negative, datase
                     newsqa_examples = list(tqdm(p.imap(annotate, paragraphs, chunksize=64), total=len(paragraphs),
                                          desc='is_training_' + str(is_training).lower() + '_paragraphs2examples'))
                 newsqa_examples = [example for entry_examples in newsqa_examples for example in entry_examples if not example.is_impossible]
-                logger.info('news_examples_pos:', len(newsqa_examples))
+                logger.info('news_examples_pos: {}'.format(len(newsqa_examples)))
         examples.extend(squad_examples)
         examples.extend(newsqa_examples)
-    logger.info('all examples add squad and newsqa:',len(examples))
+        logger.info('all examples add squad and newsqa: {}'.format(len(examples)))
     return examples
 
 def example_to_feature(example, max_seq_length=384,

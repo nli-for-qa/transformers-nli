@@ -177,7 +177,7 @@ def train(args, train_dataset, model, tokenizer):
                 model.zero_grad()
                 global_step += 1
 
-                if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
+                if (args.local_rank == -1 or torch.distributed.get_rank() == 0) and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Log metrics
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer)
@@ -189,7 +189,7 @@ def train(args, train_dataset, model, tokenizer):
                     logger.info('average loss: {}, global step: {}'.format((tr_loss - logging_loss)/args.logging_steps, global_step))
                     logging_loss = tr_loss
 
-                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
+                if (args.local_rank == -1 or torch.distributed.get_rank() == 0) and args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
                     if not os.path.exists(output_dir):
