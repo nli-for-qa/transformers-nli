@@ -531,7 +531,7 @@ class SquadParaProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-train.txt.para")), "train")
+                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-train.txt.para")), "train", negtive=0.1)
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
@@ -541,7 +541,7 @@ class SquadParaProcessor(DataProcessor):
         """See base class."""
         return ["0", "1"]
 
-    def _create_examples(self, lines, set_type):
+    def _create_examples(self, lines, set_type, negtive=1):
         """Creates examples for the training and dev sets."""
         examples = []
 
@@ -551,7 +551,7 @@ class SquadParaProcessor(DataProcessor):
                 text_a = line['question']
                 text_b = line['document']
                 label = line['label']
-                if label == '0' and random.random() < 0.5 and set_type == 'train':
+                if label == '0' and random.random() < negtive and set_type == 'train':
                     continue
             except IndexError:
                 continue
