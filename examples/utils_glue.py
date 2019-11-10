@@ -99,10 +99,8 @@ class DataProcessor(object):
     @classmethod
     def _read_json(cls, input_file):
         with open(input_file, 'r', encoding='utf-8') as fin:
-            lines = []
-            for line in fin.readlines():
-                lines.append(json.loads(line.strip('\n')))
-            return lines
+            for line in fin:
+                yield json.loads(line.strip('\n'))
 
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
@@ -531,25 +529,24 @@ class SquadParaProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-train.txt.para")), set_type="train", negtive=0.1)
+                os.path.join(data_dir, "SQuAD-v1.1-train.txt.para"), set_type="train", negtive=0.1)
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-dev.txt.para")), set_type="dev")
+                os.path.join(data_dir, "SQuAD-v1.1-dev.txt.para"), set_type="dev")
 
     def get_labels(self):
         """See base class."""
         return ["0", "1"]
 
-    def _create_examples(self, lines, set_type='train', negtive=0.1):
+    def _create_examples(self, file_name, set_type='train', negtive=0.1):
         """Creates examples for the training and dev sets."""
         examples = []
 
-        for (i, line) in tqdm.tqdm(enumerate(lines)):
-
+        for line in tqdm.tqdm(self._read_json(file_name)):
             try:
                 label = line['label']
-                if label == '0' and set_type == 'train' and random.random() < negtive:
+                if label == '0' and set_type == 'train' and random.random() > negtive:
                     continue
                 text_a = line['question']
                 text_b = line['document']
