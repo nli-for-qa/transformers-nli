@@ -531,28 +531,29 @@ class SquadParaProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-train.txt.para")), "train", negtive=0.1)
+                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-train.txt.para")), set_type="train", negtive=0.1)
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-dev.txt.para")), "dev")
+                self._read_json(os.path.join(data_dir, "SQuAD-v1.1-dev.txt.para")), set_type="dev")
 
     def get_labels(self):
         """See base class."""
         return ["0", "1"]
 
-    def _create_examples(self, lines, set_type, negtive=1):
+    def _create_examples(self, lines, set_type='train', negtive=0.1):
         """Creates examples for the training and dev sets."""
         examples = []
 
         for (i, line) in tqdm.tqdm(enumerate(lines)):
-            guid = "%s-%s" % (set_type, line.get('squad_id', None))
+
             try:
+                label = line['label']
+                if label == '0' and set_type == 'train' and random.random() < negtive:
+                    continue
                 text_a = line['question']
                 text_b = line['document']
-                label = line['label']
-                if label == '0' and random.random() < negtive and set_type == 'train':
-                    continue
+                guid = "%s-%s" % (set_type, line.get('squad_id', None))
             except IndexError:
                 continue
             examples.append(
