@@ -265,6 +265,8 @@ def evaluate(args, model, tokenizer, prefix=""):
 
                 eval_loss += tmp_eval_loss.mean().item()
             nb_eval_steps += 1
+            # if nb_eval_steps > 10:
+            #     break
             if preds is None:
                 preds = logits.detach().cpu().numpy()
                 out_label_ids = inputs['labels'].detach().cpu().numpy()
@@ -272,8 +274,13 @@ def evaluate(args, model, tokenizer, prefix=""):
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
 
+            # if nb_eval_steps > 10:
+            #     break
+
+
         eval_loss = eval_loss / nb_eval_steps
         pred_logits = preds
+        logger.info('pred logits: {}'.format(len(pred_logits)))
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
         elif args.output_mode == "regression":
@@ -293,10 +300,11 @@ def evaluate(args, model, tokenizer, prefix=""):
         result['logits'] = pred_logits.tolist()
         result['preds'] = preds.tolist()
         result['labels'] = out_label_ids.tolist()
-        results.update(result)
+        logger.info('save result json to {}'.format(os.path.join(eval_output_dir, "eval_results.json")))
         with open(os.path.join(eval_output_dir, "eval_results.json"), 'w', encoding='utf-8') as fout:
             import json
-            json.dump(results, fout)
+            json.dump(result, fout)
+        results.update(result)
     return results
 
 
