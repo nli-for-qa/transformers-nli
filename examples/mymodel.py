@@ -20,7 +20,12 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             self.pooler = BertPooler(config)
             self.classifier = nn.Linear(config.hidden_size, self.num_labels)
         else:
-            self.classifier = nn.Linear(config.hidden_size * 2, self.config.num_labels)
+            self.projection = nn.Linear(config.hidden_size * 3, config.hidden_size)
+            self.projection_dropout = nn.Dropout(0.1)
+            self.projection_activation = nn.Tanh()
+            self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+
 
         self.init_weights()
 
@@ -54,7 +59,11 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             pooled_output_a = self.dropout(pooled_output_a)
             pooled_output_b = outputs_b[1]
             pooled_output_b = self.dropout(pooled_output_b)
-            pooled_output = torch.cat((pooled_output_a, pooled_output_b), dim=1)
+            pooled_output = torch.cat((pooled_output_a, pooled_output_b, pooled_output_a - pooled_output_b), dim=1)
+            pooled_output = self.projection(pooled_output)
+            pooled_output = self.projection_activation(pooled_output)
+            pooled_output = self.projection_dropout(pooled_output)
+
         logits = self.classifier(pooled_output)
 
         outputs = (logits,) + outputs_a[2:] + outputs_b[2:]  # add hidden states and attention if they are here
