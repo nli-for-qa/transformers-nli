@@ -2,29 +2,49 @@ from transformers.modeling_bert import BertPreTrainedModel, BertModel, BertLayer
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 import torch
+from layers import StackedBRNN, SeqAttnMatch, LinearSeqAttn
 
 class BertForSequenceClassificationNq(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForSequenceClassificationNq, self).__init__(config)
         self.num_labels = config.num_labels
+        # config.output_hidden_states = True
+        bert_later_dropout = 0.3
+        self.dropout = nn.Dropout(bert_later_dropout)
+        self.later_model_type = config.later_model_type
 
-        self.bert = BertModel(config)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        # self.top_layer = BertLayer(config)
-        self.att_on_bert = None
-        if getattr(config, 'att_on_bert', None):
-            # self.att_on_bert = BertLayer(config)
-            self.att_num_layers = config.att_num_layers
-            self.att_on_bert_config = BertConfig(num_hidden_layers=self.att_num_layers)
-            self.att_on_bert = BertEncoder(self.att_on_bert_config)
-            self.pooler = BertPooler(config)
-            self.classifier = nn.Linear(config.hidden_size, self.num_labels)
-        else:
+        if self.later_model_type == 'linear':
+            self.bert = BertModel(config)
             self.projection = nn.Linear(config.hidden_size * 3, config.hidden_size)
             self.projection_dropout = nn.Dropout(0.1)
             self.projection_activation = nn.Tanh()
             self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        elif self.later_model_type == '1bert_layer':
+            config.num_hidden_layers = 1
+            self.bert = BertModel(config)
+            self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        elif self.later_model_type == 'bilinear':
+            self.bert = BertModel(config)
+            self.qemb_match = SeqAttnMatch(config.hidden_size)
+            doc_input_size = 2 * config.hidden_size
+            # RNN document encoder
+            self.doc_rnn = StackedBRNN(
+                input_size=doc_input_size,
+                hidden_size=config.hidden_size,
+                num_layers=3,
+                dropout_rate=bert_later_dropout,
+                dropout_output=bert_later_dropout,
+                concat_layers=True,
+                rnn_type=nn.LSTM,
+                padding=False,
+            )
 
+            self.bilinear_dropout = nn.Dropout(bert_later_dropout)
+            self.bilinear_size = 128
+            self.doc_proj = nn.Linear(6 * config.hidden_size, self.bilinear_size)
+            self.qs_proj = nn.Linear(config.hidden_size, self.bilinear_size)
+            self.bilinear = nn.Bilinear(self.bilinear_size, self.bilinear_size, self.bilinear_size)
+            self.classifier = nn.Linear(self.bilinear_size, config.num_labels)
 
 
         self.init_weights()
@@ -39,22 +59,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
         # pooled_output = self.dropout(pooled_output)
         outputs_a = self.bert(input_ids_a, position_ids=None, token_type_ids=token_type_ids_a, attention_mask=attention_mask_a)
         outputs_b = self.bert(input_ids_b, position_ids=None, token_type_ids=token_type_ids_b, attention_mask=attention_mask_b)
-        if self.att_on_bert:
-            sequence_outputs_a = outputs_a[0]
-            sequence_outputs_b = outputs_b[0]
-            sequence_outputs_b = sequence_outputs_b[:,1:,:]
-            sequence_outputs = torch.cat((sequence_outputs_a, sequence_outputs_b), dim=1)
-            attention_mask_b = attention_mask_b[:, 1:]
-            attention_mask = torch.cat((attention_mask_a, attention_mask_b), dim=1)
-            extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-            extended_attention_mask = extended_attention_mask.to(
-                dtype=next(self.parameters()).dtype)  # fp16 compatibility
-            extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-            head_mask = [None] * self.att_num_layers
-            sequence_outputs_att = self.att_on_bert(sequence_outputs, attention_mask=extended_attention_mask, head_mask=head_mask)
-            pooled_output = self.pooler(sequence_outputs_att[0])
-
-        else:
+        if self.later_model_type == 'linear':
             pooled_output_a = outputs_a[1]
             pooled_output_a = self.dropout(pooled_output_a)
             pooled_output_b = outputs_b[1]
@@ -63,6 +68,37 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             pooled_output = self.projection(pooled_output)
             pooled_output = self.projection_activation(pooled_output)
             pooled_output = self.projection_dropout(pooled_output)
+        elif self.later_model_type == '1bert_layer':
+            encoder_outputs = self.bert(input_ids,
+                            attention_mask=attention_mask,
+                            token_type_ids=token_type_ids,
+                            position_ids=position_ids,
+                            head_mask=head_mask)
+
+            bert_1stlayer = encoder_outputs[1]
+            # pooled_output = self.bert_pooler(bert_1stlayer)
+            pooled_output = self.dropout(bert_1stlayer)
+        elif self.later_model_type == 'bilinear':
+            question_hiddens = outputs_a[0]
+            question_hiddens = self.dropout(question_hiddens)
+            doc_hiddens = outputs_b[0]
+            doc_hiddens = self.dropout(doc_hiddens)
+            question_mask = (1 - attention_mask_a).to(torch.bool)
+            doc_mask = (1 - attention_mask_b).to(torch.bool)
+            x2_weighted_emb = self.qemb_match(doc_hiddens, question_hiddens, question_mask)
+            doc_hiddens = torch.cat((doc_hiddens, x2_weighted_emb), 2)
+            doc_hiddens = self.doc_rnn(doc_hiddens, doc_mask)
+
+            question_hidden = outputs_a[1]
+            question_hidden = self.qs_proj(question_hidden)
+            question_hidden = self.bilinear_dropout(question_hidden)
+            doc_hiddens = self.doc_proj(doc_hiddens)
+            doc_hiddens = self.bilinear_dropoutdropout(doc_hiddens)
+
+            question_hidden = question_hidden.unsqueeze(1).expand_as(doc_hiddens).contiguous()
+            doc_hiddens = self.bilinear(doc_hiddens, question_hidden)
+            pooled_output = doc_hiddens.max(dim=1)[0]
+
 
         logits = self.classifier(pooled_output)
 
