@@ -529,7 +529,7 @@ class SquadParaProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                os.path.join(data_dir, "SQuAD-v1.1-train.txt.para"), set_type="train", negtive=0.1)
+                os.path.join(data_dir, "SQuAD-v1.1-train.txt.para"), set_type="train", negtive=0.8)
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
