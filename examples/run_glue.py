@@ -251,10 +251,10 @@ def evaluate(args, model, tokenizer, prefix=""):
                     inputs.update({
                         'input_ids_a': batch[4],
                         'attention_mask_a': batch[5],
-                        'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
+                        'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet', 'bert-nq'] else None,
                         'input_ids_b': batch[7],
                         'attention_mask_b': batch[8],
-                        'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet'] else None,
+                        'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet', 'bert-nq'] else None,
                         # XLM and RoBERTa don't use segment_ids
                     })
                 outputs = model(**inputs)
@@ -514,7 +514,7 @@ def main():
             raise ValueError('later model type is not setted in config')
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
-
+    model.init_top_layer_from_bert()
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
 
