@@ -550,6 +550,8 @@ class SquadParaProcessor(DataProcessor):
                     continue
                 text_a = line['question']
                 text_b = line['document']
+                if len(text_b.split()) == 0:
+                    continue
                 guid = "%s-%s" % (set_type, line.get('squad_id', None))
             except IndexError:
                 continue
