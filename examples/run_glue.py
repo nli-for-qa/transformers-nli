@@ -148,10 +148,10 @@ def train(args, train_dataset, model, tokenizer):
                     # XLM and RoBERTa don't use segment_ids
                     'input_ids_a': batch[4],
                     'attention_mask_a': batch[5],
-                    'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet'] else None,
+                    'token_type_ids_a': batch[6] if args.model_type in ['bert', 'xlnet', 'bert-nq'] else None,
                     'input_ids_b': batch[7],
                     'attention_mask_b': batch[8],
-                    'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet'] else None,
+                    'token_type_ids_b': batch[9] if args.model_type in ['bert', 'xlnet', 'bert-nq'] else None,
                     # XLM and RoBERTa don't use segment_ids
                 })
             outputs = model(**inputs)
@@ -508,6 +508,8 @@ def main():
             setattr(config, 'later_model_type', 'linear')
         elif args.later_model_type == 'bilinear':
             setattr(config, 'later_model_type', 'bilinear')
+        elif args.later_model_type == 'transformer':
+            setattr(config, 'later_model_type', 'transformer')
         else:
             raise ValueError('later model type is not setted in config')
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)

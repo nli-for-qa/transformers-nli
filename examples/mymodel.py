@@ -46,6 +46,16 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             self.qs_proj = nn.Linear(config.hidden_size, self.bilinear_size)
             self.bilinear = nn.Bilinear(self.bilinear_size, self.bilinear_size, self.bilinear_size)
             self.classifier = nn.Linear(self.bilinear_size, config.num_labels)
+        elif self.later_model_type == 'transformer':
+            self.copy_from_bert_layer_num = 11
+            self.bert = BertModel(config)
+
+            self.bert_position_emb =  nn.Embedding(config.max_position_embeddings, config.hidden_size)
+            self.bert_type_id_emb = nn.Embedding(config.type_vocab_size, config.hidden_size)
+
+            self.bert_layer = BertLayer(config)
+            self.bert_pooler = BertPooler(config)
+            self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
 
         self.init_weights()
@@ -99,6 +109,27 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             question_hidden = question_hidden.unsqueeze(1).expand_as(doc_hiddens).contiguous()
             doc_hiddens = self.bilinear(doc_hiddens, question_hidden)
             pooled_output = doc_hiddens.max(dim=1)[0]
+        elif self.later_model_type == 'transformer':
+            bert_embeddings_a = outputs_a[0]
+            bert_embeddings_b = outputs_b[0]
+            embeddings_cat = torch.cat((bert_embeddings_a, bert_embeddings_b), dim=1)
+            attention_mask = torch.cat((attention_mask_a, attention_mask_b), dim=1)
+            extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+            extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype)
+            extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+            token_type_ids_a = torch.zeros_like(token_type_ids_a)
+            token_type_ids_b = torch.ones_like(token_type_ids_b)
+            token_type_ids = torch.cat((token_type_ids_a, token_type_ids_b), dim=1)
+            token_type_ids_emb = self.bert_type_id_emb(token_type_ids)
+            seq_length = embeddings_cat.size(1)
+            if position_ids is None:
+                position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
+                position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+            embeddings_cat_position_emb = self.bert_pooler(position_ids)
+            transformer_input = embeddings_cat + embeddings_cat_position_emb + token_type_ids_emb
+            transformer_outputs = self.bert_layer(transformer_input, extended_attention_mask)
+            pooled_output = self.bert_pooler(transformer_outputs[0])
+
 
 
         logits = self.classifier(pooled_output)
