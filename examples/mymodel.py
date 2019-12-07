@@ -25,13 +25,14 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             self.classifier = nn.Linear(config.hidden_size, config.num_labels)
         elif self.later_model_type == 'bilinear':
             self.bert = BertModel(config)
+            lstm_layers = 2
             self.qemb_match = SeqAttnMatch(config.hidden_size)
             doc_input_size = 2 * config.hidden_size
             # RNN document encoder
             self.doc_rnn = StackedBRNN(
                 input_size=doc_input_size,
                 hidden_size=config.hidden_size,
-                num_layers=3,
+                num_layers=lstm_layers,
                 dropout_rate=bert_later_dropout,
                 dropout_output=bert_later_dropout,
                 concat_layers=True,
@@ -41,7 +42,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
 
             self.bilinear_dropout = nn.Dropout(bert_later_dropout)
             self.bilinear_size = 128
-            self.doc_proj = nn.Linear(6 * config.hidden_size, self.bilinear_size)
+            self.doc_proj = nn.Linear( lstm_layers *2 * config.hidden_size, self.bilinear_size)
             self.qs_proj = nn.Linear(config.hidden_size, self.bilinear_size)
             self.bilinear = nn.Bilinear(self.bilinear_size, self.bilinear_size, self.bilinear_size)
             self.classifier = nn.Linear(self.bilinear_size, config.num_labels)
@@ -93,7 +94,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             question_hidden = self.qs_proj(question_hidden)
             question_hidden = self.bilinear_dropout(question_hidden)
             doc_hiddens = self.doc_proj(doc_hiddens)
-            doc_hiddens = self.bilinear_dropoutdropout(doc_hiddens)
+            doc_hiddens = self.bilinear_dropout(doc_hiddens)
 
             question_hidden = question_hidden.unsqueeze(1).expand_as(doc_hiddens).contiguous()
             doc_hiddens = self.bilinear(doc_hiddens, question_hidden)
