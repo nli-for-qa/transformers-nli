@@ -514,7 +514,8 @@ def main():
             raise ValueError('later model type is not setted in config')
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
-    model.init_top_layer_from_bert()
+    if args.model_type == 'bert-nq':
+        model.init_top_layer_from_bert()
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
 
