@@ -5,6 +5,22 @@ import torch
 from layers import StackedBRNN, SeqAttnMatch, LinearSeqAttn
 import copy
 
+class BertPoolerQD(nn.Module):
+    def __init__(self, config):
+        super(BertPoolerQD, self).__init__()
+        self.dense = nn.Linear(config.hidden_size * 2, config.hidden_size)
+        self.activation = nn.Tanh()
+
+    def forward(self, hidden_states, question_size):
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token.
+        first_token_tensor = hidden_states[:, 0]
+        doc_cls_tensor = hidden_states[:, question_size]
+        pooled_output = torch.cat((first_token_tensor, doc_cls_tensor), dim=-1)
+        pooled_output = self.dense(pooled_output)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
+
 class BertForSequenceClassificationNq(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForSequenceClassificationNq, self).__init__(config)
@@ -54,7 +70,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             self.bert_type_id_emb = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
             self.bert_layer = BertLayer(config)
-            self.bert_pooler = BertPooler(config)
+            self.bert_pooler_qd = BertPoolerQD(config)
             self.classifier = nn.Linear(config.hidden_size, config.num_labels)
         self.init_weights()
 
@@ -137,9 +153,7 @@ class BertForSequenceClassificationNq(BertPreTrainedModel):
             embeddings_cat_position_emb = self.bert_position_emb(position_ids)
             transformer_input = embeddings_cat + embeddings_cat_position_emb + token_type_ids_emb
             transformer_outputs = self.bert_layer(transformer_input, extended_attention_mask)
-            pooled_output = self.bert_pooler(transformer_outputs[0])
-
-
+            pooled_output = self.bert_pooler_qd(transformer_outputs[0], question_size=input_ids_a.size(1))
 
         logits = self.classifier(pooled_output)
 
