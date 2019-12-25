@@ -21,7 +21,7 @@ def convert_nq2squad(examples):
                 short_answers = annotation['short_answers']
                 if short_answers:
                     for short_answer in short_answers:
-                        answers.append({'answer_text': " ".join(context.split()[short_answer['start_token']:short_answer['end_token']]), 'answer_start': -1})
+                        answers.append({'text': " ".join(context.split()[short_answer['start_token']:short_answer['end_token']]), 'answer_start': -1})
                     # print(short_answers)
         qas = [{'question': example['question_text'], 'id': example['example_id'], "answers": answers}]
         paragraph = {'context': context,
@@ -46,5 +46,5 @@ if __name__ == '__main__':
     parser.add_argument('--kaggle_test_file', help='kaggle test file nq-test.jsonl')
     parser.add_argument('--output_file', help='output file name')
     args = parser.parse_args()
-    args.output_file = args.kaggle_test_file + '.squad'
+    # args.output_file = args.kaggle_test_file + '.squad'
     convert_kaggle2squad(args.kaggle_test_file, args.output_file)
