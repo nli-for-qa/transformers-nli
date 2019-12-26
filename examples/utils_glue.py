@@ -559,6 +559,41 @@ class SquadParaProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
+class NqParaProcessor(DataProcessor):
+    """Processor for the QQP data set (GLUE version)."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+                os.path.join(data_dir, "nq-train.para"), set_type="train", negtive=0.8)
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+                os.path.join(data_dir, "nq-dev.para"), set_type="dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, file_name, set_type='train', negtive=0.1):
+        """Creates examples for the training and dev sets."""
+        examples = []
+
+        for line in tqdm.tqdm(self._read_json(file_name)):
+            try:
+                label = line['label']
+                if label == '0' and set_type == 'train' and random.random() > negtive:
+                    continue
+                text_a = line['question']
+                text_b = line['document']
+                if len(text_b.split()) == 0:
+                    continue
+                guid = "%s-%s" % (set_type, line.get('squad_id', None))
+            except IndexError:
+                continue
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return examples
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
@@ -823,6 +858,8 @@ def compute_metrics(task_name, preds, labels):
         return pre_recall_f1(preds, labels)
     elif task_name == 'squad_para':
         return pre_recall_f1(preds, labels)
+    elif task_name == 'nq_para':
+        return pre_recall_f1(preds, labels)
     else:
         raise KeyError(task_name)
 
@@ -840,6 +877,7 @@ processors = {
     'squad_sent': SquadSentProcessor,
     'nq': NqSentProcessor,
     'squad_para': SquadParaProcessor,
+    'nq_para': NqParaProcessor,
 }
 
 output_modes = {
@@ -856,6 +894,7 @@ output_modes = {
     'squad_sent': 'classification',
     'nq': 'classification',
     'squad_para': 'classification',
+    'nq_para': 'classification',
 }
 
 GLUE_TASKS_NUM_LABELS = {
@@ -871,4 +910,5 @@ GLUE_TASKS_NUM_LABELS = {
     'squad_sent': 2,
     "nq":2,
     "squad_para": 2,
+    'nq_para':2,
 }
