@@ -478,11 +478,13 @@ def convert_examples_to_features(examples, max_seq_length,
                                  mask_padding_with_zero=True,
                                  add_prefix_space=False,
                                  negtive_sample_probability=1.0,
-                                 model_type='bert'):
+                                 model_type='bert',
+                                 threads=1):
     logger.info('Multiprocessing!')
     unique_id = 1000000000
     features_initial = []
-    with Pool(Thread_num) as p:
+    threads = threads
+    with Pool(threads) as p:
         annotate = partial(example_to_feature, max_seq_length=max_seq_length,
                                  tokenizer=tokenizer,
                                  doc_stride=doc_stride, max_query_length=max_query_length, is_training=is_training,
@@ -533,17 +535,21 @@ def convert_examples_to_features1(examples, max_seq_length,
                                  pad_token_segment_id=0,
                                  sequence_a_segment_id=0,
                                  sequence_b_segment_id=1,
-                                 mask_padding_with_zero=True):
+                                 mask_padding_with_zero=True,
+                                 add_prefix_space=False,
+                                 negtive_sample_probability=1.0,
+                                 model_type='bert'):
     """Loads a data file into a list of `InputBatch`s."""
-
+    logger.info('without multi-processing')
     unique_id = 1000000000
 
     features = []
     for (example_index, example) in tqdm(enumerate(examples)):
 
-
-        query_tokens = tokenizer.tokenize(example.question_text)
-
+        if model_type == 'roberta':
+            query_tokens = tokenizer.tokenize(example.question_text, add_prefix_space=add_prefix_space)
+        else:
+            query_tokens = tokenizer.tokenize(example.question_text)
         if len(query_tokens) > max_query_length:
             query_tokens = query_tokens[0:max_query_length]
 
@@ -552,7 +558,10 @@ def convert_examples_to_features1(examples, max_seq_length,
         all_doc_tokens = []
         for (i, token) in enumerate(example.doc_tokens):
             orig_to_tok_index.append(len(all_doc_tokens))
-            sub_tokens = tokenizer.tokenize(token)
+            if model_type == 'roberta':
+                sub_tokens = tokenizer.tokenize(token, add_prefix_space=add_prefix_space)
+            else:
+                sub_tokens = tokenizer.tokenize(token)
             for sub_token in sub_tokens:
                 tok_to_orig_index.append(i)
                 all_doc_tokens.append(sub_token)
@@ -570,7 +579,7 @@ def convert_examples_to_features1(examples, max_seq_length,
                 tok_end_position = len(all_doc_tokens) - 1
             (tok_start_position, tok_end_position) = _improve_answer_span(
                 all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
-                example.orig_answer_text)
+                example.orig_answer_text, add_prefix_space=add_prefix_space, model_type=model_type)
 
         # The -3 accounts for [CLS], [SEP] and [SEP]
         if sep_token_extra:
@@ -616,7 +625,6 @@ def convert_examples_to_features1(examples, max_seq_length,
                 tokens.append(token)
                 segment_ids.append(sequence_a_segment_id)
                 p_mask.append(1)
-
 
             # SEP token
             if sep_token_extra:
@@ -673,13 +681,6 @@ def convert_examples_to_features1(examples, max_seq_length,
                 segment_ids = segment_ids + ([pad_token_segment_id] * padding_length)
                 p_mask = p_mask + ([1] * padding_length)
 
-
-            # while len(input_ids) < max_seq_length:
-            #     input_ids.append(pad_token)
-            #     input_mask.append(0 if mask_padding_with_zero else 1)
-            #     segment_ids.append(pad_token_segment_id)
-            #     p_mask.append(1)
-
             assert len(input_ids) == max_seq_length
             assert len(input_mask) == max_seq_length
             assert len(segment_ids) == max_seq_length
@@ -712,30 +713,8 @@ def convert_examples_to_features1(examples, max_seq_length,
                 start_position = cls_index
                 end_position = cls_index
 
-            if example_index < 2:
-                logger.info("*** Example ***")
-                logger.info("unique_id: %s" % (unique_id))
-                logger.info("example_index: %s" % (example_index))
-                logger.info("doc_span_index: %s" % (doc_span_index))
-                logger.info("tokens: %s" % " ".join(tokens))
-                logger.info("token_to_orig_map: %s" % " ".join([
-                    "%d:%d" % (x, y) for (x, y) in token_to_orig_map.items()]))
-                logger.info("token_is_max_context: %s" % " ".join([
-                    "%d:%s" % (x, y) for (x, y) in token_is_max_context.items()
-                ]))
-                logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-                logger.info(
-                    "input_mask: %s" % " ".join([str(x) for x in input_mask]))
-                logger.info(
-                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-                if is_training and span_is_impossible:
-                    logger.info("impossible example")
-                if is_training and not span_is_impossible:
-                    answer_text = " ".join(tokens[start_position:(end_position + 1)])
-                    logger.info("start_position: %d" % (start_position))
-                    logger.info("end_position: %d" % (end_position))
-                    logger.info(
-                        "answer: %s" % (answer_text))
+            if is_training and span_is_impossible and random.random() > negtive_sample_probability:
+                continue
 
             features.append(
                 InputFeatures(
@@ -753,7 +732,8 @@ def convert_examples_to_features1(examples, max_seq_length,
                     paragraph_len=paragraph_len,
                     start_position=start_position,
                     end_position=end_position,
-                    is_impossible=span_is_impossible))
+                    is_impossible=span_is_impossible)
+            )
             unique_id += 1
 
     return features
@@ -1031,7 +1011,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
         all_nbest_json[example.qas_id] = nbest_json
 
     with open(output_prediction_file, "w") as writer:
-        writer.write(json.dumps(all_predictions, indent=4) + "\n")
+        json.dump(all_predictions, writer)
 
     with open(output_nbest_file, "w") as writer:
         writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
@@ -1269,11 +1249,11 @@ def write_nq_predictions(all_examples, all_features, all_results, n_best_size,
 
 
     with open(output_nbest_file, "w") as writer:
-        writer.write(json.dumps(all_nq_nbest_predictions, indent=4) + "\n")
+        json.dump(all_nq_nbest_predictions, writer)
 
     predictions_json = {"predictions": all_nq_predictions}
     with open(output_prediction_file, "w") as writer:
-        writer.write(json.dumps(predictions_json, indent=4) + "\n")
+        json.dump(predictions_json, writer)
     return all_nq_predictions
 #--------------------------lqq end ---------------------------------------------------------
 # For XLNet (and XLM which uses the same head)

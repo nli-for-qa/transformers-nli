@@ -29,7 +29,8 @@ from transformers import (WEIGHTS_NAME, BertConfig,
 
 from transformers import AdamW, WarmupLinearSchedule
 
-from utils_squad import (read_squad_examples, convert_examples_to_features,
+
+from utils_squad import (read_squad_examples, convert_examples_to_features, convert_examples_to_features1,
                          RawResult, write_predictions,write_nq_predictions,
                          RawResultExtended, write_predictions_extended)
 
@@ -314,7 +315,28 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                                                     is_training=not evaluate,
                                                     version_2_with_negative=args.version_2_with_negative)
 
-        features = convert_examples_to_features(examples=examples,
+        if args.threads:
+            features = convert_examples_to_features(examples=examples,
+                                                tokenizer=tokenizer,
+                                                max_seq_length=args.max_seq_length,
+                                                doc_stride=args.doc_stride,
+                                                max_query_length=args.max_query_length,
+                                                is_training=not evaluate,
+                                                cls_token_at_end=bool(args.model_type in ['xlnet']),
+                                                cls_token=tokenizer.cls_token,
+                                                cls_token_segment_id=2 if args.model_type in ['xlnet'] else 0,
+                                                sep_token=tokenizer.sep_token,
+                                                sep_token_extra=bool(args.model_type in ['roberta']),
+                                                pad_on_left=bool(args.model_type in ['xlnet']),
+                                                pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
+                                                pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
+                                                add_prefix_space=True if args.model_type == 'roberta' else False,
+                                                negtive_sample_probability=args.nsp,
+                                                model_type=args.model_type,
+                                                threads=args.threads,
+                                                )
+        else:
+            features = convert_examples_to_features1(examples=examples,
                                                 tokenizer=tokenizer,
                                                 max_seq_length=args.max_seq_length,
                                                 doc_stride=args.doc_stride,
@@ -468,6 +490,7 @@ def main():
     parser.add_argument("--eval_gzip_dir", default=None, type=str,
                         help="NQ dev gzip's dir for predictions")#lqq added
     parser.add_argument("--task_name",default="squad",required=True)
+    parser.add_argument("--threads", default=0, type=int)
 
     args = parser.parse_args()
 

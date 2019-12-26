@@ -287,9 +287,11 @@ def main(OPTS):
     dataset = dataset_json['data']
   with open(OPTS.pred_file) as f:
     preds = json.load(f)
+    # preds = {int(key): value for key, value in preds.items()}
   if OPTS.na_prob_file:
     with open(OPTS.na_prob_file) as f:
       na_probs = json.load(f)
+      # na_probs = {int(key): value for key, value in na_probs.items()}
   else:
     na_probs = {k: 0.0 for k in preds}
   qid_to_has_ans = make_qid_to_has_ans(dataset)  # maps qid to True/False
