@@ -452,7 +452,11 @@ def main(OPTS):
       pickle.dump(nq_gold_dict, open(cache_path, 'w'))
 
   nq_pred_dict = util.read_prediction_json(OPTS.pred_path)
-
+  gold_id_set = set(nq_gold_dict.keys())
+  pred_id_set = set(nq_pred_dict.keys())
+  if len(gold_id_set) != len(pred_id_set):
+    print('gold ids is not equal to pred ids! exit!')
+    return 0
   long_answer_stats, short_answer_stats = score_answers(nq_gold_dict,
                                                         nq_pred_dict)
 
