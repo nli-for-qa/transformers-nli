@@ -452,12 +452,15 @@ class NqSentProcessor(DataProcessor):
         with open(input_file,'r',encoding='utf-8') as fin:
             data = json.load(fin)['data']
         lines=[]
+        p = 0
+        n = 0
+        import random
         for article in data:
             for paragraph in article['paragraphs']:
                 context = paragraph['context']
                 question = paragraph['qas'][0]['question']
                 id_ = paragraph['qas'][0]['id']
-                for sent_span,sent_label,keep_label in zip(paragraph['context_para'],
+                for sent_span, sent_label, keep_label in zip(paragraph['context_para'],
                                                             paragraph['para_labels'],
                                                             paragraph['keep_or_not']):
                     line = {}
@@ -467,6 +470,11 @@ class NqSentProcessor(DataProcessor):
                     line['id'] = id_
                     if keep_label:
                         lines.append(line)
+                        if line['label'] == '1':
+                            p += 1
+                        else:
+                            n += 1
+        logger.info('positive {} negative {}'.format(p, n))
         return lines
 
     @classmethod
@@ -497,11 +505,11 @@ class SquadSentProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "train-v2.0.json.sent")), "train")
+                self._read_json(os.path.join(data_dir, "train.json.sent")), "train")
     def get_dev_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-                self._read_json(os.path.join(data_dir, "dev-v2.0.json.sent")), "dev")
+                self._read_json(os.path.join(data_dir, "dev.json.sent")), "dev")
 
     def get_labels(self):
         """See base class."""
@@ -510,17 +518,23 @@ class SquadSentProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
-
+        p = 0
+        n = 0
         for (i, line) in tqdm.tqdm(enumerate(lines)):
             guid = "%s-%s" % (set_type, line['id'])
             try:
                 text_a = line['question']
                 text_b = line['sentence']
                 label = line['label']
+                if label == '1':
+                    p += 1
+                else:
+                    n += 1
             except IndexError:
                 continue
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        logger.info('positive {} negative {}'.format(p, n))
         return examples
 
 class SquadParaProcessor(DataProcessor):
