@@ -20,7 +20,7 @@ import logging
 
 import torch
 import torch.nn as nn
-from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn import CrossEntropyLoss, MSELoss, BCELoss
 
 from .configuration_roberta import RobertaConfig
 from .file_utils import add_start_docstrings
@@ -527,6 +527,93 @@ class RobertaForMultipleChoice(BertPreTrainedModel):
 
         return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
 
+
+@add_start_docstrings(
+    """Roberta Model with a multiple choice classification head on top (a linear layer on top of
+    the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
+    ROBERTA_START_DOCSTRING,
+    ROBERTA_INPUTS_DOCSTRING,
+)
+class TripletLoss(nn.Module):
+    """
+    Triplet loss
+    Takes embeddings of an anchor sample, a positive sample and a negative sample
+    """
+
+    def __init__(self, margin = 1.0):
+        super(TripletLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, anchor, positive, negative, size_average=True):
+        distance_positive = (anchor - positive).pow(2).sum(1)  # .pow(.5)
+        distance_negative = (anchor - negative).pow(2).sum(1)  # .pow(.5)
+        losses = torch.relu(distance_positive - distance_negative + self.margin)
+        return losses.mean() if size_average else losses.sum()
+
+
+class RobertaForTri(BertPreTrainedModel):
+    config_class = RobertaConfig
+    pretrained_model_archive_map = ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP
+    base_model_prefix = "roberta"
+
+    def __init__(self, config):
+        super(RobertaForTri, self).__init__(config)
+
+        self.roberta = RobertaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+        self.triplet_loss = TripletLoss(margin=1.0)
+
+        self.init_weights()
+
+    def forward(
+        self,
+        input_ids=None,
+        token_type_ids=None,
+        attention_mask=None,
+        labels=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+    ):
+        num_choices = input_ids.shape[1]
+        batch_size = input_ids.size(0)
+        flat_input_ids = input_ids.view(-1, input_ids.size(-1))
+        flat_position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        flat_labels = labels.view(-1) if labels is not None else None
+        outputs = self.roberta(
+            flat_input_ids,
+            position_ids=flat_position_ids,
+            token_type_ids=flat_token_type_ids,
+            attention_mask=flat_attention_mask,
+            head_mask=head_mask,
+        )
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output).view(-1)
+        logits = self.sigmoid(logits)
+        reshaped_logits = logits.view(-1, num_choices)
+
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        pooled_output_tri = pooled_output.view(batch_size, num_choices, -1)
+        positive_indices = labels > 0.5
+        negtive_indices = labels < 0.5
+        positive_output = pooled_output_tri[positive_indices].view(batch_size, 2, -1)
+        negtive_output = pooled_output_tri[negtive_indices].view(batch_size, num_choices - 2, -1)
+        # tri_loss = self.triplet_loss(positive_output[:, 0, :], positive_output[:, 1, :], negtive_output[:, 0, :])
+
+
+        if labels is not None:
+            loss_fct = BCELoss()
+            loss = loss_fct(logits, flat_labels.float())
+            # loss = loss + tri_loss
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
 
 @add_start_docstrings(
     """Roberta Model with a token classification head on top (a linear layer on top of

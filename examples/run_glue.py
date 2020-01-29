@@ -315,6 +315,7 @@ def evaluate(args, model, tokenizer, prefix=""):
         eval_loss = 0.0
         nb_eval_steps = 0
         preds = None
+        preds_logits = None
         out_label_ids = None
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
@@ -331,22 +332,28 @@ def evaluate(args, model, tokenizer, prefix=""):
 
                 eval_loss += tmp_eval_loss.mean().item()
             nb_eval_steps += 1
-            if preds is None:
-                preds = logits.detach().cpu().numpy()
+            if preds_logits is None:
+                preds_logits = logits.detach().cpu().numpy()
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
             else:
-                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                preds_logits = np.append(preds_logits, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
-            preds = np.argmax(preds, axis=1)
+            preds = np.argmax(preds_logits, axis=1)
         elif args.output_mode == "regression":
-            preds = np.squeeze(preds)
+            preds = np.squeeze(preds_logits)
         result = compute_metrics(eval_task, preds, out_label_ids)
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
+        output_eval_json = os.path.join(eval_output_dir, prefix, "eval_results.json")
+        logging.info('write results to {}'.format(output_eval_json))
+        with open(output_eval_json, 'w') as fout:
+            json.dump({'preds': preds.tolist(),
+                       'labels': out_label_ids.tolist(),
+                       'logits': preds_logits.tolist()}, fout)
         with open(output_eval_file, "w") as writer:
             logger.info("***** Eval results {} *****".format(prefix))
             for key in sorted(result.keys()):

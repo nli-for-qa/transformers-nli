@@ -199,6 +199,58 @@ class SwagProcessor(DataProcessor):
 
         return examples
 
+class HotpotProcessor(DataProcessor):
+    """Processor for the SWAG data set."""
+
+    def _read_json(self, input_file):
+        data = []
+        with open(input_file, "r", encoding="utf-8") as fin:
+            for line in fin:
+                data.append(json.loads(line.strip('\n')))
+        return data
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} train".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json.para.tri")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} dev".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json.para.tri")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} dev".format(data_dir))
+        raise ValueError(
+            "For swag testing, the input file does not contain a label column. It can not be tested in current code"
+            "setting!"
+        )
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json.para.tri")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, lines, type: str):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for line in tqdm.tqdm(lines, total=len(lines), desc='convert input examples'):
+            question = line['question']
+            paras = line['paras']
+            labels = line['labels']
+            _id = line['_id']
+            examples.append(
+                    InputExample(
+                        example_id=_id,
+                        question = question,
+                        contexts=paras,
+                        endings=['' for _ in paras],
+                        label=labels,
+                    )
+            )
+
+        return examples
 
 class ArcProcessor(DataProcessor):
     """Processor for the ARC data set (request from allennlp)."""
@@ -350,7 +402,7 @@ def convert_examples_to_features(
             assert len(token_type_ids) == max_length
             choices_features.append((input_ids, attention_mask, token_type_ids))
 
-        label = label_map[example.label]
+        label = label_map[example.label] if type(example.label) != list else [label_map[x] for x in example.label]
 
         if ex_index < 2:
             logger.info("*** Example ***")
@@ -367,7 +419,7 @@ def convert_examples_to_features(
     return features
 
 
-processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor}
+processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor, 'hotpot': HotpotProcessor}
 
 
-MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4}
+MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4, "hotpot", 2}

@@ -37,6 +37,7 @@ from transformers import (
     RobertaConfig,
     RobertaForMultipleChoice,
     RobertaTokenizer,
+    RobertaForTri,
     XLNetConfig,
     XLNetForMultipleChoice,
     XLNetTokenizer,
@@ -61,6 +62,7 @@ MODEL_CLASSES = {
     "bert": (BertConfig, BertForMultipleChoice, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer),
     "roberta": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
+    "roberta-tri": (RobertaConfig, RobertaForTri, RobertaTokenizer),
 }
 
 
@@ -244,6 +246,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
     eval_outputs_dirs = (args.output_dir,)
 
     results = {}
+    tri = False
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
         eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, evaluate=not test, test=test)
 
@@ -287,13 +290,25 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             nb_eval_steps += 1
             if preds is None:
                 preds = logits.detach().cpu().numpy()
-                out_label_ids = inputs["labels"].detach().cpu().numpy()
+                if inputs["labels"].size(-1) > 1:
+                    out_label_ids = inputs["labels"].view(-1).detach().cpu().numpy()
+                    tri = True
+                else:
+                    out_label_ids = inputs["labels"].detach().cpu().numpy()
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-                out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+                if inputs["labels"].size(-1) > 1:
+                    out_label_ids = np.append(out_label_ids, inputs["labels"].view(-1).detach().cpu().numpy(), axis=0)
+                    tri = True
+                else:
+                    out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
-        preds = np.argmax(preds, axis=1)
+        if not tri:
+            preds = np.argmax(preds, axis=1)
+        else:
+            preds[preds > 0.5] = 1.0
+            preds[preds <= 0.5] = 0.0
         acc = simple_accuracy(preds, out_label_ids)
         result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
