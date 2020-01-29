@@ -17,6 +17,7 @@ from .processors import (
     glue_processors,
     glue_tasks_num_labels,
     squad_convert_examples_to_features,
+    squad_convert_examples_to_features_without_process,
     xnli_output_modes,
     xnli_processors,
     xnli_tasks_num_labels,

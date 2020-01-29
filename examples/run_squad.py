@@ -52,14 +52,16 @@ from transformers import (
     XLNetTokenizer,
     get_linear_schedule_with_warmup,
     squad_convert_examples_to_features,
+    squad_convert_examples_to_features_without_process,
 )
 from transformers.data.metrics.squad_metrics import (
     compute_predictions_log_probs,
     compute_predictions_logits,
     squad_evaluate,
+    write_nq_predictions,
 )
 from transformers.data.processors.squad import SquadResult, SquadV1Processor, SquadV2Processor
-
+from utlis_nq_eval import EVAL_OPTS_NQ, main as evaluate_on_nq
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -170,19 +172,15 @@ def train(args, train_dataset, model, tokenizer):
     steps_trained_in_current_epoch = 0
     # Check if continuing training from a checkpoint
     if os.path.exists(args.model_name_or_path):
-        try:
-            # set global_step to gobal_step of last saved checkpoint from model path
-            checkpoint_suffix = args.model_name_or_path.split("-")[-1].split("/")[0]
-            global_step = int(checkpoint_suffix)
-            epochs_trained = global_step // (len(train_dataloader) // args.gradient_accumulation_steps)
-            steps_trained_in_current_epoch = global_step % (len(train_dataloader) // args.gradient_accumulation_steps)
+        # set global_step to gobal_step of last saved checkpoint from model path
+        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
+        epochs_trained = global_step // (len(train_dataloader) // args.gradient_accumulation_steps)
+        steps_trained_in_current_epoch = global_step % (len(train_dataloader) // args.gradient_accumulation_steps)
 
-            logger.info("  Continuing training from checkpoint, will skip to saved global_step")
-            logger.info("  Continuing training from epoch %d", epochs_trained)
-            logger.info("  Continuing training from global step %d", global_step)
-            logger.info("  Will skip the first %d steps in the first epoch", steps_trained_in_current_epoch)
-        except ValueError:
-            logger.info("  Starting fine-tuning.")
+        logger.info("  Continuing training from checkpoint, will skip to saved global_step")
+        logger.info("  Continuing training from epoch %d", epochs_trained)
+        logger.info("  Continuing training from global step %d", global_step)
+        logger.info("  Will skip the first %d steps in the first epoch", steps_trained_in_current_epoch)
 
     tr_loss, logging_loss = 0.0, 0.0
     model.zero_grad()
@@ -207,13 +205,10 @@ def train(args, train_dataset, model, tokenizer):
             inputs = {
                 "input_ids": batch[0],
                 "attention_mask": batch[1],
-                "token_type_ids": batch[2],
+                "token_type_ids": None if args.model_type in ["xlm", "roberta", "distilbert"] else batch[2],
                 "start_positions": batch[3],
                 "end_positions": batch[4],
             }
-
-            if args.model_type in ["xlm", "roberta", "distilbert"]:
-                del inputs["token_type_ids"]
 
             if args.model_type in ["xlnet", "xlm"]:
                 inputs.update({"cls_index": batch[5], "p_mask": batch[6]})
@@ -319,12 +314,8 @@ def evaluate(args, model, tokenizer, prefix=""):
             inputs = {
                 "input_ids": batch[0],
                 "attention_mask": batch[1],
-                "token_type_ids": batch[2],
+                "token_type_ids": None if args.model_type in ["xlm", "roberta", "distilbert"] else batch[2],
             }
-
-            if args.model_type in ["xlm", "roberta", "distilbert"]:
-                del inputs["token_type_ids"]
-
             example_indices = batch[3]
 
             # XLNet and XLM use more arguments for their predictions
@@ -396,24 +387,47 @@ def evaluate(args, model, tokenizer, prefix=""):
             args.verbose_logging,
         )
     else:
-        predictions = compute_predictions_logits(
-            examples,
-            features,
-            all_results,
-            args.n_best_size,
-            args.max_answer_length,
-            args.do_lower_case,
-            output_prediction_file,
-            output_nbest_file,
-            output_null_log_odds_file,
-            args.verbose_logging,
-            args.version_2_with_negative,
-            args.null_score_diff_threshold,
-            tokenizer,
-        )
+        if args.task_name == "squad":
+            predictions = compute_predictions_logits(
+                examples,
+                features,
+                all_results,
+                args.n_best_size,
+                args.max_answer_length,
+                args.do_lower_case,
+                output_prediction_file,
+                output_nbest_file,
+                output_null_log_odds_file,
+                args.verbose_logging,
+                args.version_2_with_negative,
+                args.null_score_diff_threshold,
+                tokenizer,
+            )
+        else:
+            write_nq_predictions(
+                examples,
+                features,
+                all_results,
+                args.n_best_size,
+                args.max_answer_length,
+                args.do_lower_case,
+                output_prediction_file,
+                output_nbest_file,
+                output_null_log_odds_file,
+                args.verbose_logging,
+                args.version_2_with_negative,
+                args.null_score_diff_threshold,
+                tokenizer,)
 
     # Compute the F1 and exact scores.
-    results = squad_evaluate(examples, predictions)
+    if args.task_name == "nq":
+        evaluate_options = EVAL_OPTS_NQ(gold_path = args.eval_gzip_dir,
+                                     pred_path=output_prediction_file)
+        results = evaluate_on_nq(evaluate_options)
+    elif args.task_name == 'squad':
+        results = squad_evaluate(examples, predictions)
+    else:
+        raise ValueError('{} is wrong taks_name!'.format(args.task_name))
     return results
 
 
@@ -434,14 +448,10 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
     )
 
     # Init features and dataset from cache if it exists
-    if os.path.exists(cached_features_file) and not args.overwrite_cache:
+    if os.path.exists(cached_features_file) and not args.overwrite_cache and not output_examples:
         logger.info("Loading features from cached file %s", cached_features_file)
         features_and_dataset = torch.load(cached_features_file)
-        features, dataset, examples = (
-            features_and_dataset["features"],
-            features_and_dataset["dataset"],
-            features_and_dataset["examples"],
-        )
+        features, dataset = features_and_dataset["features"], features_and_dataset["dataset"]
     else:
         logger.info("Creating features from dataset file at %s", input_dir)
 
@@ -463,20 +473,34 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
             else:
                 examples = processor.get_train_examples(args.data_dir, filename=args.train_file)
 
-        features, dataset = squad_convert_examples_to_features(
-            examples=examples,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            doc_stride=args.doc_stride,
-            max_query_length=args.max_query_length,
-            is_training=not evaluate,
-            return_dataset="pt",
-            threads=args.threads,
-        )
+        if args.threads == 0:
+            features, dataset = squad_convert_examples_to_features_without_process(
+                examples=examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=not evaluate,
+                return_dataset="pt",
+                threads=args.threads,
+                nsp=args.nsp,
+            )
+        else:
+            features, dataset = squad_convert_examples_to_features(
+                examples=examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=not evaluate,
+                return_dataset="pt",
+                threads=args.threads,
+                nsp=args.nsp,
+            )
 
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
-            torch.save({"features": features, "dataset": dataset, "examples": examples}, cached_features_file)
+            torch.save({"features": features, "dataset": dataset}, cached_features_file)
 
     if args.local_rank == 0 and not evaluate:
         # Make sure only the first process in distributed training process the dataset, and the others will use the cache
@@ -669,7 +693,13 @@ def main():
     parser.add_argument("--server_port", type=str, default="", help="Can be used for distant debugging.")
 
     parser.add_argument("--threads", type=int, default=1, help="multiple threads for converting example to features")
+    parser.add_argument("--nsp", type=float, default=1.0, help="negtive sampling rate")
+    parser.add_argument("--task_name", type=str, default="squad", help="task name of qa: nq or squad")
+    parser.add_argument("--eval_gzip_dir", type=str, default='', help='the dir of gold zips')
     args = parser.parse_args()
+    if args.task_name == 'nq':
+        if args.eval_gzip_dir == '':
+            raise ValueError('gzip dir {} is wrong!'.format(args.eval_gzip_dir))
 
     if (
         os.path.exists(args.output_dir)
@@ -787,7 +817,7 @@ def main():
         torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        model = model_class.from_pretrained(args.output_dir)  # , force_download=True)
+        model = model_class.from_pretrained(args.output_dir)#, force_download=True)
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         model.to(args.device)
 
@@ -812,7 +842,7 @@ def main():
         for checkpoint in checkpoints:
             # Reload the model
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            model = model_class.from_pretrained(checkpoint)  # , force_download=True)
+            model = model_class.from_pretrained(checkpoint)#, force_download=True)
             model.to(args.device)
 
             # Evaluate

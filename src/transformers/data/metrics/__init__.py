@@ -16,7 +16,7 @@
 
 try:
     from scipy.stats import pearsonr, spearmanr
-    from sklearn.metrics import matthews_corrcoef, f1_score
+    from sklearn.metrics import matthews_corrcoef, f1_score, precision_recall_fscore_support
 
     _has_sklearn = True
 except (AttributeError, ImportError):
@@ -72,6 +72,8 @@ if _has_sklearn:
             return {"acc": simple_accuracy(preds, labels)}
         elif task_name == "wnli":
             return {"acc": simple_accuracy(preds, labels)}
+        elif task_name == "hotpot":
+            return {"result": precision_recall_fscore_support(preds, labels)}
         else:
             raise KeyError(task_name)
 
