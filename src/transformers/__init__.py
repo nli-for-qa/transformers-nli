@@ -56,6 +56,14 @@ from .data import (
     xnli_output_modes,
     xnli_processors,
     xnli_tasks_num_labels,
+    HotpotExample,
+    HotpotFeatures,
+    HotpotV1Processor,
+    HotpotProcessor,
+    hotpot_convert_examples_to_features,
+    hotpot_convert_examples_to_features_without_process,
+    HotpotResult,
+    HopotV2Processor,
 )
 
 # Files and general utilities
@@ -207,6 +215,7 @@ if is_torch_available():
         RobertaForMultipleChoice,
         RobertaForTri,
         RobertaForTokenClassification,
+        RobertaForQuestionAnsweringHotpot,
         RobertaForQuestionAnswering,
         ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
     )

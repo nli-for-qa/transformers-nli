@@ -40,6 +40,7 @@ from transformers import (
     BertTokenizer,
     DistilBertConfig,
     DistilBertForQuestionAnswering,
+    RobertaForQuestionAnsweringHotpot,
     DistilBertTokenizer,
     RobertaConfig,
     RobertaForQuestionAnswering,
@@ -53,6 +54,8 @@ from transformers import (
     get_linear_schedule_with_warmup,
     squad_convert_examples_to_features,
     squad_convert_examples_to_features_without_process,
+    hotpot_convert_examples_to_features_without_process,
+    hotpot_convert_examples_to_features,
 )
 from transformers.data.metrics.squad_metrics import (
     compute_predictions_log_probs,
@@ -61,6 +64,7 @@ from transformers.data.metrics.squad_metrics import (
     write_nq_predictions,
 )
 from transformers.data.processors.squad import SquadResult, SquadV1Processor, SquadV2Processor
+from transformers.data.processors.hotpot import HotpotResult, HotpotProcessor, HotpotV1Processor, HopotV2Processor
 from utlis_nq_eval import EVAL_OPTS_NQ, main as evaluate_on_nq
 
 try:
@@ -83,8 +87,13 @@ MODEL_CLASSES = {
     "xlm": (XLMConfig, XLMForQuestionAnswering, XLMTokenizer),
     "distilbert": (DistilBertConfig, DistilBertForQuestionAnswering, DistilBertTokenizer),
     "albert": (AlbertConfig, AlbertForQuestionAnswering, AlbertTokenizer),
+    "hotpot_roberta": (RobertaConfig, RobertaForQuestionAnsweringHotpot, RobertaTokenizer),
 }
 
+DATA_CLASSES = {
+    'squad': (SquadResult, SquadV1Processor, SquadV2Processor, squad_convert_examples_to_features, squad_convert_examples_to_features_without_process, squad_evaluate),
+    'hotpot': (HotpotResult, HotpotV1Processor, HopotV2Processor, hotpot_convert_examples_to_features, hotpot_convert_examples_to_features_without_process, squad_evaluate),
+}
 
 def set_seed(args):
     random.seed(args.seed)
@@ -205,7 +214,7 @@ def train(args, train_dataset, model, tokenizer):
             inputs = {
                 "input_ids": batch[0],
                 "attention_mask": batch[1],
-                "token_type_ids": None if args.model_type in ["xlm", "roberta", "distilbert"] else batch[2],
+                "token_type_ids": None if args.model_type in ["xlm", "roberta", "distilbert", "hotpot_roberta"] else batch[2],
                 "start_positions": batch[3],
                 "end_positions": batch[4],
             }
@@ -214,6 +223,10 @@ def train(args, train_dataset, model, tokenizer):
                 inputs.update({"cls_index": batch[5], "p_mask": batch[6]})
                 if args.version_2_with_negative:
                     inputs.update({"is_impossible": batch[7]})
+            if args.model_type == 'hotpot_roberta':
+                inputs.update({"sentence_indices": batch[7],
+                               "sentence_labels": batch[8],
+                               "type_labels": batch[9]})
             outputs = model(**inputs)
             # model outputs are always tuple in transformers (see doc)
             loss = outputs[0]
@@ -250,6 +263,7 @@ def train(args, train_dataset, model, tokenizer):
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
+                    logging.info("average loss: {}, global step: {}".format((tr_loss - logging_loss) / args.logging_steps, global_step))
                     logging_loss = tr_loss
 
                 # Save model checkpoint
@@ -306,6 +320,8 @@ def evaluate(args, model, tokenizer, prefix=""):
     all_results = []
     start_time = timeit.default_timer()
 
+    RESULT = DATA_CLASSES[args.task_name][0]
+
     for batch in tqdm(eval_dataloader, desc="Evaluating"):
         model.eval()
         batch = tuple(t.to(args.device) for t in batch)
@@ -314,13 +330,15 @@ def evaluate(args, model, tokenizer, prefix=""):
             inputs = {
                 "input_ids": batch[0],
                 "attention_mask": batch[1],
-                "token_type_ids": None if args.model_type in ["xlm", "roberta", "distilbert"] else batch[2],
+                "token_type_ids": None if args.model_type in ["xlm", "roberta", "distilbert", "hotpot_roberta"] else batch[2],
             }
             example_indices = batch[3]
 
             # XLNet and XLM use more arguments for their predictions
             if args.model_type in ["xlnet", "xlm"]:
                 inputs.update({"cls_index": batch[4], "p_mask": batch[5]})
+            if args.model_type == 'hotpot_roberta':
+                inputs.update({"sentence_indices": batch[6]})
 
             outputs = model(**inputs)
 
@@ -339,7 +357,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                 end_top_index = output[3]
                 cls_logits = output[4]
 
-                result = SquadResult(
+                result = RESULT(
                     unique_id,
                     start_logits,
                     end_logits,
@@ -347,10 +365,12 @@ def evaluate(args, model, tokenizer, prefix=""):
                     end_top_index=end_top_index,
                     cls_logits=cls_logits,
                 )
-
+            elif args.model_type == 'hotpot_roberta':
+                start_logits, end_logits, type_logits, sentence_logits = output
+                result = RESULT(unique_id, start_logits, end_logits, type_logits=type_logits, sentence_logits=sentence_logits)
             else:
                 start_logits, end_logits = output
-                result = SquadResult(unique_id, start_logits, end_logits)
+                result = RESULT(unique_id, start_logits, end_logits)
 
             all_results.append(result)
 
@@ -403,7 +423,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                 args.null_score_diff_threshold,
                 tokenizer,
             )
-        else:
+        elif args.task_name == "nq":
             write_nq_predictions(
                 examples,
                 features,
@@ -418,6 +438,25 @@ def evaluate(args, model, tokenizer, prefix=""):
                 args.version_2_with_negative,
                 args.null_score_diff_threshold,
                 tokenizer,)
+        elif args.task_name == 'hotpot':
+            predictions = compute_predictions_logits(
+                examples,
+                features,
+                all_results,
+                args.n_best_size,
+                args.max_answer_length,
+                args.do_lower_case,
+                output_prediction_file,
+                output_nbest_file,
+                output_null_log_odds_file,
+                args.verbose_logging,
+                args.version_2_with_negative,
+                args.null_score_diff_threshold,
+                tokenizer,
+            )
+        else:
+            raise ValueError('wrong task_name in args!')
+
 
     # Compute the F1 and exact scores.
     if args.task_name == "nq":
@@ -426,6 +465,8 @@ def evaluate(args, model, tokenizer, prefix=""):
         results = evaluate_on_nq(evaluate_options)
     elif args.task_name == 'squad':
         results = squad_evaluate(examples, predictions)
+    elif args.task_name == 'hotpot':
+        results = DATA_CLASSES[args.task_name][5](examples, predictions)
     else:
         raise ValueError('{} is wrong taks_name!'.format(args.task_name))
     return results
@@ -465,16 +506,16 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                 logger.warn("tensorflow_datasets does not handle version 2 of SQuAD.")
 
             tfds_examples = tfds.load("squad")
-            examples = SquadV1Processor().get_examples_from_dataset(tfds_examples, evaluate=evaluate)
+            examples = DATA_CLASSES[args.task_name][1].get_examples_from_dataset(tfds_examples, evaluate=evaluate)
         else:
-            processor = SquadV2Processor() if args.version_2_with_negative else SquadV1Processor()
+            processor = DATA_CLASSES[args.task_name][2]() if args.version_2_with_negative else DATA_CLASSES[args.task_name][1]()
             if evaluate:
                 examples = processor.get_dev_examples(args.data_dir, filename=args.predict_file)
             else:
                 examples = processor.get_train_examples(args.data_dir, filename=args.train_file)
 
         if args.threads == 0:
-            features, dataset = squad_convert_examples_to_features_without_process(
+            features, dataset = DATA_CLASSES[args.task_name][4](
                 examples=examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
@@ -486,7 +527,7 @@ def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=Fal
                 nsp=args.nsp,
             )
         else:
-            features, dataset = squad_convert_examples_to_features(
+            features, dataset = DATA_CLASSES[args.task_name][3](
                 examples=examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
@@ -692,7 +733,7 @@ def main():
     parser.add_argument("--server_ip", type=str, default="", help="Can be used for distant debugging.")
     parser.add_argument("--server_port", type=str, default="", help="Can be used for distant debugging.")
 
-    parser.add_argument("--threads", type=int, default=1, help="multiple threads for converting example to features")
+    parser.add_argument("--threads", type=int, default=0, help="multiple threads for converting example to features")
     parser.add_argument("--nsp", type=float, default=1.0, help="negtive sampling rate")
     parser.add_argument("--task_name", type=str, default="squad", help="task name of qa: nq or squad")
     parser.add_argument("--eval_gzip_dir", type=str, default='', help='the dir of gold zips')

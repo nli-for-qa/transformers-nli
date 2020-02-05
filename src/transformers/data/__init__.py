@@ -21,6 +21,14 @@ from .processors import (
     xnli_output_modes,
     xnli_processors,
     xnli_tasks_num_labels,
+    HotpotV1Processor,
+    HotpotProcessor,
+    HotpotFeatures,
+    HotpotExample,
+    hotpot_convert_examples_to_features_without_process,
+    hotpot_convert_examples_to_features,
+    HotpotResult,
+    HopotV2Processor,
 )
 
 

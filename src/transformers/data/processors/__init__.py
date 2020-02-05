@@ -6,3 +6,5 @@ from .glue import glue_convert_examples_to_features, glue_output_modes, glue_pro
 from .squad import SquadExample, SquadFeatures, SquadV1Processor, SquadV2Processor, squad_convert_examples_to_features, squad_convert_examples_to_features_without_process
 from .utils import DataProcessor, InputExample, InputFeatures, SingleSentenceClassificationProcessor
 from .xnli import xnli_output_modes, xnli_processors, xnli_tasks_num_labels
+from .hotpot import HotpotExample, HotpotFeatures, HotpotProcessor, HotpotV1Processor,\
+    hotpot_convert_examples_to_features, hotpot_convert_examples_to_features_without_process, HopotV2Processor, HotpotResult
