@@ -118,7 +118,8 @@ def convert2para(data_list, max_para_num=15, is_training=False, converted_keys='
                 label = "1"
             para_id += 1
             para_example = {'id': title, 'squad_id': _id, 'question': question, 'document': para_text,
-                            'squad_answers': answers, 'label': label, 'sentence_indices': sentence_indices}
+                            'squad_answers': answers, 'label': label, 'sentence_indices': sentence_indices,
+                            'context_title': para[:]}
             if label == '1':
                 positive += 1
             else:
@@ -194,6 +195,10 @@ def convert2squad(data, option='gold'):
                     sentences.append(para_list[sentence_index])
                     sentence_titles.append(title)
 
+                    if len(sentences[-1]) > 1000:
+                        print('sentence in title {} is too long, length is {}, tokens {}'.format(title, len(sentences[-1]),
+                                                                                                            len(sentences[-1].split())))
+
         elif option == 'selected':
             for index in range(len(example['selected'])):
                 example['selected'][index][-1][-1] = example['selected'][index][-1][-1] + ' '
@@ -208,6 +213,9 @@ def convert2squad(data, option='gold'):
                         sentence_labels.append("0")
                     sentences.append(para_list[sentence_index])
                     sentence_titles.append(title)
+                    if len(sentences[-1]) > 1000:
+                        print('sentence in title {} is too long, length is {}, tokens {}'.format(title, len(sentences[-1]),
+                                                                                                            len(sentences[-1].split())))
 
         else:
             raise ValueError('wrong option of converting squad!')
@@ -229,8 +237,10 @@ def convert2squad(data, option='gold'):
         if answer in "yes no":
             answer_text = ''
             answer_start = -1
+            yes_no_answer = answer
         else:
             answer_text = answer
+            yes_no_answer = 'text'
             answer_start = context.find(answer)
             if answer_start == -1 and option == 'gold':
                 print('wrong example, skipped!')
@@ -240,7 +250,7 @@ def convert2squad(data, option='gold'):
             is_impossible = False
 
         answers.append({'text': answer_text, 'answer_start': answer_start,
-                            'yes_no': True if answer in "yes no" else False, 'type': type, 'level': level,
+                            'yes_no_answer': yes_no_answer.lower(), 'type': type, 'level': level,
                             'sp': sf,
                             'sentences': sentences, 'sentence_indices': sentence_indices,
                             "sentence_labels": sentence_labels, 'sentence_titles': sentence_titles})
@@ -250,7 +260,11 @@ def convert2squad(data, option='gold'):
                 'is_impossible': is_impossible}]
         paragraph = {'context': context,
                      'qas': qas,
+                     'sentences': sentences,
+                     'sentence_indices': sentence_indices,
+                     'sentence_titles': sentence_titles,
                      }
+
         paragraphs = [paragraph]
         squad_data['data'].append({'title': 'title', 'paragraphs': paragraphs})
     print('yes nums is {}, no nums is {}, text answer nums is {}'.format(yes_nums, no_nums, str_nums))

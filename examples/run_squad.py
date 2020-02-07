@@ -60,6 +60,7 @@ from transformers import (
 from transformers.data.metrics.squad_metrics import (
     compute_predictions_log_probs,
     compute_predictions_logits,
+    compute_predictions_logits_hotpot,
     squad_evaluate,
     write_nq_predictions,
 )
@@ -192,6 +193,10 @@ def train(args, train_dataset, model, tokenizer):
         logger.info("  Will skip the first %d steps in the first epoch", steps_trained_in_current_epoch)
 
     tr_loss, logging_loss = 0.0, 0.0
+    tr_type_loss, tr_sent_loss = 0.0, 0.0
+    tr_yes_no_loss = 0.0
+    logging_type_loss, logging_sent_loss = 0.0, 0.0
+    logging_yes_no_loss = 0.0
     model.zero_grad()
     train_iterator = trange(
         epochs_trained, int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0]
@@ -226,15 +231,26 @@ def train(args, train_dataset, model, tokenizer):
             if args.model_type == 'hotpot_roberta':
                 inputs.update({"sentence_indices": batch[7],
                                "sentence_labels": batch[8],
-                               "type_labels": batch[9]})
+                               "type_labels": batch[9],
+                               'yes_no_labels': batch[10],
+                               })
             outputs = model(**inputs)
             # model outputs are always tuple in transformers (see doc)
             loss = outputs[0]
+            type_loss = outputs[1]
+            sent_loss = outputs[2]
+            yes_no_loss = outputs[3]
 
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel (not distributed) training
+                type_loss = type_loss.mean()
+                sent_loss = sent_loss.mean()
+                yes_no_loss = yes_no_loss.mean()
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
+                type_loss = type_loss / args.gradient_accumulation_steps
+                sent_loss = sent_loss / args.gradient_accumulation_steps
+                yes_no_loss = yes_no_loss / args.gradient_accumulation_steps
 
             if args.fp16:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -243,6 +259,9 @@ def train(args, train_dataset, model, tokenizer):
                 loss.backward()
 
             tr_loss += loss.item()
+            tr_type_loss += type_loss.item()
+            tr_sent_loss += sent_loss.item()
+            tr_yes_no_loss += yes_no_loss.item()
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
@@ -262,9 +281,24 @@ def train(args, train_dataset, model, tokenizer):
                         for key, value in results.items():
                             tb_writer.add_scalar("eval_{}".format(key), value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
-                    tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
-                    logging.info("average loss: {}, global step: {}".format((tr_loss - logging_loss) / args.logging_steps, global_step))
+                    tb_writer.add_scalar("total_loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
+                    logging.info("average total loss: {}, global step: {}".format((tr_loss - logging_loss) / args.logging_steps, global_step))
+                    tb_writer.add_scalar("type_loss", (tr_type_loss - logging_type_loss) / args.logging_steps, global_step)
+                    logging.info(
+                        "average type loss: {}, global step: {}".format((tr_type_loss - logging_type_loss) / args.logging_steps,
+                                                                   global_step))
+                    tb_writer.add_scalar("sent_loss", (tr_sent_loss - logging_sent_loss) / args.logging_steps, global_step)
+                    logging.info(
+                        "average sent loss: {}, global step: {}".format((tr_sent_loss - logging_sent_loss) / args.logging_steps,
+                                                                   global_step))
+                    tb_writer.add_scalar("yes_no_loss", (tr_yes_no_loss - logging_yes_no_loss) / args.logging_steps, global_step)
+                    logging.info(
+                        "yes no sent loss: {}, global step: {}".format((tr_yes_no_loss - logging_yes_no_loss) / args.logging_steps,
+                                                                   global_step))
                     logging_loss = tr_loss
+                    logging_type_loss = tr_type_loss
+                    logging_sent_loss = tr_sent_loss
+                    logging_yes_no_loss = tr_yes_no_loss
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -350,7 +384,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
             # Some models (XLNet, XLM) use 5 arguments for their predictions, while the other "simpler"
             # models only use two.
-            if len(output) >= 5:
+            if len(output) >= 5 and args.model_type != 'hotpot_roberta':
                 start_logits = output[0]
                 start_top_index = output[1]
                 end_logits = output[2]
@@ -366,8 +400,9 @@ def evaluate(args, model, tokenizer, prefix=""):
                     cls_logits=cls_logits,
                 )
             elif args.model_type == 'hotpot_roberta':
-                start_logits, end_logits, type_logits, sentence_logits = output
-                result = RESULT(unique_id, start_logits, end_logits, type_logits=type_logits, sentence_logits=sentence_logits)
+                start_logits, end_logits, type_logits, sentence_logits, yes_no_logits = output
+                result = RESULT(unique_id, start_logits, end_logits, type_logits=type_logits,
+                                sentence_logits=sentence_logits, yes_no_logits=yes_no_logits)
             else:
                 start_logits, end_logits = output
                 result = RESULT(unique_id, start_logits, end_logits)
@@ -439,7 +474,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                 args.null_score_diff_threshold,
                 tokenizer,)
         elif args.task_name == 'hotpot':
-            predictions = compute_predictions_logits(
+            predictions = compute_predictions_logits_hotpot(
                 examples,
                 features,
                 all_results,
@@ -466,7 +501,15 @@ def evaluate(args, model, tokenizer, prefix=""):
     elif args.task_name == 'squad':
         results = squad_evaluate(examples, predictions)
     elif args.task_name == 'hotpot':
+        logging.info('evaluate hotpot qa performance.')
         results = DATA_CLASSES[args.task_name][5](examples, predictions)
+        logging.info(('evaluate hotpot metrics.'))
+        from hotpot_qa.evaluation_script import eval
+        pred_file = output_prediction_file + ".hotpot"
+        gold_file = args.hotpot_file
+        hotpot_result = eval(prediction_file=pred_file, gold_file=gold_file)
+        results.update(hotpot_result)
+
     else:
         raise ValueError('{} is wrong taks_name!'.format(args.task_name))
     return results
@@ -737,6 +780,7 @@ def main():
     parser.add_argument("--nsp", type=float, default=1.0, help="negtive sampling rate")
     parser.add_argument("--task_name", type=str, default="squad", help="task name of qa: nq or squad")
     parser.add_argument("--eval_gzip_dir", type=str, default='', help='the dir of gold zips')
+    parser.add_argument("--hotpot_file", type=str, default='', help='hotpot gold file')
     args = parser.parse_args()
     if args.task_name == 'nq':
         if args.eval_gzip_dir == '':
@@ -898,4 +942,5 @@ def main():
 
 
 if __name__ == "__main__":
+    print('test')
     main()

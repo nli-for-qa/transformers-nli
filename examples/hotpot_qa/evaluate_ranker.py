@@ -132,8 +132,8 @@ def eval_p_level(pred_dict, label_dict, top_n=2):
     print('results is {}'.format(metrics))
 
 
-def write_json(data, file):
-    print('write squad format data to {}'.format(file))
+def write_json(data, file, data_format='squad'):
+    print('write {} format data to {}'.format(data_format, file))
     with open(file, 'w', encoding='utf-8') as f:
         json.dump(data, f)
 
@@ -224,6 +224,29 @@ def convert_topn2squad(scored_retrieval, top_n=5):
     print('yes nums is {}, no nums is {}, text answer nums is {}'.format(yes_nums, no_nums, str_nums))
     return squad_data
 
+def combine_examples_with_scores(hotpot_examples, examples_dict):
+    hotpot_examples_combined = []
+    module = 'ranked'
+    for example in hotpot_examples:
+        _id = example['_id']
+        paras_ranked = examples_dict.get(_id, [])
+        example[module] = []
+        if not paras_ranked:
+            print('id {} misses paras!')
+            continue
+        for para in paras_ranked:
+            context_title = para['context_title']
+            title = para['context_title'][0]
+            context = para['context_title'][1]
+            score = para['logit'][1]
+            example[module].append([module, score, title, context])
+        hotpot_examples_combined.append(example)
+    return hotpot_examples_combined
+
+
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval_file', default='', help='evaluated file')
@@ -237,6 +260,7 @@ if __name__ == '__main__':
 
     examples = combine_examples_results(eval_examples, eval_results)
     examples_dict = examples2dict(examples)
+    hotpot_examples_with_scores = combine_examples_with_scores(hotpot_examples, examples_dict)
     hotpot_dict = {example['_id']: example for example in hotpot_examples}
     retrieved_hotpot = examples2hotpot(examples_dict)
     retrieved_hotpot_dict = {example['_id']: example for example in retrieved_hotpot}
@@ -247,8 +271,11 @@ if __name__ == '__main__':
         hotpot_dict[_id]['scored_retrieved'] = retrieved['scored_retrieved']
 
     squad_data = convert_topn2squad(hotpot_dict, top_n=args.top_n)
-    squad_file = args.eval_file + ".squad.top_{}".format(args.top_n)
-    write_json(squad_data, squad_file)
+
+    output_file = args.eval_file + ".ranked"
+    write_json(hotpot_examples_with_scores, output_file,data_format='hotpot ranked')
+    # squad_file = args.eval_file + ".squad.top_{}".format(args.top_n)
+    # write_json(squad_data, squad_file)
 
 
 

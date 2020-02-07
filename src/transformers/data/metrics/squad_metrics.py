@@ -14,7 +14,7 @@ import logging
 import math
 import re
 import string
-
+import torch
 from transformers.tokenization_bert import BasicTokenizer
 
 
@@ -344,6 +344,14 @@ def _get_best_indexes(logits, n_best_size):
         best_indexes.append(index_and_score[i][0])
     return best_indexes
 
+def _get_indexes_better_than_th(logits_dict, th=0.0):
+    """Get the n-best logits from a list."""
+    start_ends = []
+    for start_end, logit in logits_dict.items():
+        if logit > th:
+            start_ends.append(start_end)
+    return start_ends
+
 
 def _compute_softmax(scores):
     """Compute softmax probability over raw logits."""
@@ -402,7 +410,7 @@ def compute_predictions_logits(
     all_predictions = collections.OrderedDict()
     all_nbest_json = collections.OrderedDict()
     scores_diff_json = collections.OrderedDict()
-
+    type_label_dict = {'bridge': 0, 'comparison': 1}
     for (example_index, example) in enumerate(all_examples):
         features = example_index_to_features[example_index]
 
@@ -553,6 +561,277 @@ def compute_predictions_logits(
             else:
                 all_predictions[example.qas_id] = best_non_null_entry.text
         all_nbest_json[example.qas_id] = nbest_json
+
+    with open(output_prediction_file, "w") as writer:
+        writer.write(json.dumps(all_predictions, indent=4) + "\n")
+
+    with open(output_nbest_file, "w") as writer:
+        writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
+
+    if version_2_with_negative:
+        with open(output_null_log_odds_file, "w") as writer:
+            writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
+
+    return all_predictions
+
+def update_sentence_logits(token_start, token_end, sentence_logits_final, sentence_token_indices, sentence_logit):
+    if token_start == -1:
+        return
+    for token_indice in sentence_token_indices:
+        if token_start >= token_indice[0] and token_end <= token_indice[1] and \
+                (token_end - token_start) > (token_indice[1] - token_indice[0]) * 4 / 5:
+            sentence_logits_final[(token_indice[0], token_indice[1])].append(sentence_logit)
+
+def compute_predictions_logits_hotpot(
+    all_examples,
+    all_features,
+    all_results,
+    n_best_size,
+    max_answer_length,
+    do_lower_case,
+    output_prediction_file,
+    output_nbest_file,
+    output_null_log_odds_file,
+    verbose_logging,
+    version_2_with_negative,
+    null_score_diff_threshold,
+    tokenizer,
+):
+    """Write final predictions to the json file and log-odds of null if needed."""
+    logger.info("Writing predictions to: %s" % (output_prediction_file))
+    logger.info("Writing nbest to: %s" % (output_nbest_file))
+
+    example_index_to_features = collections.defaultdict(list)
+    for feature in all_features:
+        example_index_to_features[feature.example_index].append(feature)
+
+    unique_id_to_result = {}
+    for result in all_results:
+        unique_id_to_result[result.unique_id] = result
+
+    _PrelimPrediction = collections.namedtuple(  # pylint: disable=invalid-name
+        "PrelimPrediction", ["feature_index", "start_index", "end_index", "start_logit", "end_logit"]
+    )
+
+    all_predictions = collections.OrderedDict()
+    all_predictions_hotpot = collections.OrderedDict()
+    all_predictions_hotpot_pred = {'sp': {}, 'answer': {}}
+    all_nbest_json = collections.OrderedDict()
+    scores_diff_json = collections.OrderedDict()
+    type_label = ['bridge', 'comparison']
+    yes_no_label = ['yes', 'yes', 'no']
+    for (example_index, example) in enumerate(all_examples):
+        features = example_index_to_features[example_index]
+
+        sentence_indices = example.sentence_indices
+        sentence_token_indices = features[0].sentence_token_indices
+        sentence_token_indices_to_index = {tuple(x):i for i,x in enumerate(sentence_token_indices)}
+        sentence_titles = example.sentence_titles
+        assert len(sentence_titles) == len(sentence_indices)
+        assert len(sentence_indices) == len(sentence_token_indices)
+        title_to_indices = {title:[] for title in sentence_titles}
+        for sentence_index, sentence_title in enumerate(sentence_titles):
+            title_to_indices[sentence_title].append(sentence_index)
+        index_to_title_sf_num = {}
+        for title, indices in title_to_indices.items():
+            for index, indice in enumerate(indices):
+                index_to_title_sf_num[indice] = {'title': title, 'sf_sent_num': index}
+
+        sentence_logits_final = {tuple(x): [] for x in sentence_token_indices}
+        type_logits = [0, 0]
+        yes_no_logits = [0, 0, 0]
+
+        prelim_predictions = []
+        # keep track of the minimum score of null start+end of position 0
+        score_null = 1000000  # large and positive
+        min_null_feature_index = 0  # the paragraph slice with min null score
+        null_start_logit = 0  # the start logit at the slice with min null score
+        null_end_logit = 0  # the end logit at the slice with min null score
+        for (feature_index, feature) in enumerate(features):
+            result = unique_id_to_result[feature.unique_id]
+            start_indexes = _get_best_indexes(result.start_logits, n_best_size)
+            end_indexes = _get_best_indexes(result.end_logits, n_best_size)
+
+            span_sentence_logits = [x[1] for x in result.sentence_logits]
+            span_sentence_tok_indices = [x for x in feature.span_sentence_indices]
+            for span_sentence_tok_index, span_entence_tok_indice in enumerate(span_sentence_tok_indices):
+                try:
+                    if span_entence_tok_indice[0] != -1:
+                        token_start, token_end = feature.token_to_orig_map[span_entence_tok_indice[0]], feature.token_to_orig_map[span_entence_tok_indice[1]]
+                        update_sentence_logits(token_start, token_end, sentence_logits_final, sentence_token_indices, span_sentence_logits[span_sentence_tok_index])
+                except:
+                    raise ValueError('sentence tok indice errors!')
+            type_logits[0] += result.type_logit[0]
+            type_logits[1] += result.type_logit[1]
+            yes_no_logits[0] += result.yes_no_logits[0]
+            yes_no_logits[1] += result.yes_no_logits[1]
+            yes_no_logits[2] += result.yes_no_logits[2]
+
+            # if we could have irrelevant answers, get the min score of irrelevant
+            if version_2_with_negative:
+                feature_null_score = result.start_logits[0] + result.end_logits[0]
+                if feature_null_score < score_null:
+                    score_null = feature_null_score
+                    min_null_feature_index = feature_index
+                    null_start_logit = result.start_logits[0]
+                    null_end_logit = result.end_logits[0]
+            for start_index in start_indexes:
+                for end_index in end_indexes:
+                    # We could hypothetically create invalid predictions, e.g., predict
+                    # that the start of the span is in the question. We throw out all
+                    # invalid predictions.
+                    if start_index >= len(feature.tokens):
+                        continue
+                    if end_index >= len(feature.tokens):
+                        continue
+                    if start_index not in feature.token_to_orig_map:
+                        continue
+                    if end_index not in feature.token_to_orig_map:
+                        continue
+                    if not feature.token_is_max_context.get(start_index, False):
+                        continue
+                    if end_index < start_index:
+                        continue
+                    length = end_index - start_index + 1
+                    if length > max_answer_length:
+                        continue
+                    prelim_predictions.append(
+                        _PrelimPrediction(
+                            feature_index=feature_index,
+                            start_index=start_index,
+                            end_index=end_index,
+                            start_logit=result.start_logits[start_index],
+                            end_logit=result.end_logits[end_index],
+                        )
+                    )
+        if version_2_with_negative:
+            prelim_predictions.append(
+                _PrelimPrediction(
+                    feature_index=min_null_feature_index,
+                    start_index=0,
+                    end_index=0,
+                    start_logit=null_start_logit,
+                    end_logit=null_end_logit,
+                )
+            )
+
+        prelim_predictions = sorted(prelim_predictions, key=lambda x: (x.start_logit + x.end_logit), reverse=True)
+
+        _NbestPrediction = collections.namedtuple(  # pylint: disable=invalid-name
+            "NbestPrediction", ["text", "start_logit", "end_logit"]
+        )
+
+        seen_predictions = {}
+        nbest = []
+        for pred in prelim_predictions:
+            if len(nbest) >= n_best_size:
+                break
+            feature = features[pred.feature_index]
+            if pred.start_index > 0:  # this is a non-null prediction
+                tok_tokens = feature.tokens[pred.start_index : (pred.end_index + 1)]
+                orig_doc_start = feature.token_to_orig_map[pred.start_index]
+                orig_doc_end = feature.token_to_orig_map[pred.end_index]
+                orig_tokens = example.doc_tokens[orig_doc_start : (orig_doc_end + 1)]
+
+                tok_text = tokenizer.convert_tokens_to_string(tok_tokens)
+
+                # tok_text = " ".join(tok_tokens)
+                #
+                # # De-tokenize WordPieces that have been split off.
+                # tok_text = tok_text.replace(" ##", "")
+                # tok_text = tok_text.replace("##", "")
+
+                # Clean whitespace
+                tok_text = tok_text.strip()
+                tok_text = " ".join(tok_text.split())
+                orig_text = " ".join(orig_tokens)
+
+                final_text = get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
+                if final_text in seen_predictions:
+                    continue
+
+                seen_predictions[final_text] = True
+            else:
+                final_text = ""
+                seen_predictions[final_text] = True
+
+            nbest.append(_NbestPrediction(text=final_text, start_logit=pred.start_logit, end_logit=pred.end_logit))
+        # if we didn't include the empty option in the n-best, include it
+        if version_2_with_negative:
+            if "" not in seen_predictions:
+                nbest.append(_NbestPrediction(text="", start_logit=null_start_logit, end_logit=null_end_logit))
+
+            # In very rare edge cases we could only have single null prediction.
+            # So we just create a nonce prediction in this case to avoid failure.
+            if len(nbest) == 1:
+                nbest.insert(0, _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0))
+
+        # In very rare edge cases we could have no valid predictions. So we
+        # just create a nonce prediction in this case to avoid failure.
+        if not nbest:
+            nbest.append(_NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0))
+
+        assert len(nbest) >= 1
+
+        total_scores = []
+        best_non_null_entry = None
+        for entry in nbest:
+            total_scores.append(entry.start_logit + entry.end_logit)
+            if not best_non_null_entry:
+                if entry.text:
+                    best_non_null_entry = entry
+
+        probs = _compute_softmax(total_scores)
+
+        nbest_json = []
+        for (i, entry) in enumerate(nbest):
+            output = collections.OrderedDict()
+            output["text"] = entry.text
+            output["probability"] = probs[i]
+            output["start_logit"] = entry.start_logit
+            output["end_logit"] = entry.end_logit
+            nbest_json.append(output)
+
+        assert len(nbest_json) >= 1
+
+        pred_answer_text = ''
+        if not version_2_with_negative:
+            pred_answer_text = nbest_json[0]["text"]
+        else:
+            # predict "" iff the null score - the score of best non-null > threshold
+            score_diff = score_null - best_non_null_entry.start_logit - (best_non_null_entry.end_logit)
+            scores_diff_json[example.qas_id] = score_diff
+            if score_diff > null_score_diff_threshold:
+                pred_answer_text = ""
+            else:
+                pred_answer_text = best_non_null_entry.text
+
+        all_nbest_json[example.qas_id] = nbest_json
+
+        type_index = _get_best_indexes(type_logits, 1)[0]
+        yes_no_index = _get_best_indexes(yes_no_logits, 1)[0]
+        type_pred = type_label[type_index]
+        yes_no_pred = yes_no_label[yes_no_index]
+        for sentence_indice, sentence_logits in sentence_logits_final.items():
+            if not sentence_logits:
+                # logging.info('sentence indice: {} is not predicted!'.format(sentence_indice))
+                sentence_logits_final[sentence_indice] = [0]
+            sentence_logits_final[sentence_indice] = sum(sentence_logits_final[sentence_indice]) * 1.0 / len(sentence_logits_final[sentence_indice])
+        start_ends = _get_indexes_better_than_th(sentence_logits_final, th=0.2)
+        start_ends_indexs = [sentence_token_indices_to_index[start_end] for start_end in start_ends]
+        sentence_preds = [index_to_title_sf_num[x] for x in start_ends_indexs]
+        all_predictions[example.qas_id] = pred_answer_text
+        all_predictions_hotpot[example.qas_id] = {'pred_answer_text': pred_answer_text if pred_answer_text != '' else yes_no_pred,
+                                                  'pred_sf': sentence_preds, 'pred_type': type_pred}
+
+    for example_id, pred in all_predictions_hotpot.items():
+        all_predictions_hotpot_pred['answer'][example_id] = pred['pred_answer_text']
+        all_predictions_hotpot_pred['sp'][example_id] = [[x['title'], x['sf_sent_num']] for x in pred['pred_sf']]
+
+    output_prediction_file_hotpot = output_prediction_file + ".hotpot"
+    logging.info('write hotpot predictions to {}'.format(output_prediction_file_hotpot))
+    with open(output_prediction_file_hotpot, 'w', encoding='utf-8') as f:
+        json.dump(all_predictions_hotpot_pred, f)
 
     with open(output_prediction_file, "w") as writer:
         writer.write(json.dumps(all_predictions, indent=4) + "\n")

@@ -262,6 +262,7 @@ def hotpot_convert_examples_to_features_without_process(examples, tokenizer, max
     sentence_label_dict = {'0': 0, '1': 1}
     level_label_dict = {'easy': 0, 'medium': 1, 'hard': 2}
     type_label_dict = {'bridge': 0, 'comparison': 1}
+    yes_no_label_dict = {'text':0, 'yes': 1, 'no': 2}
     yes_no = {}
     for (example_index, example) in tqdm(enumerate(examples)):
         if is_training and not example.is_impossible:
@@ -307,6 +308,7 @@ def hotpot_convert_examples_to_features_without_process(examples, tokenizer, max
 
             answer = answers[0]
             type_label = type_label_dict[answer['type']]
+            yes_no_label = yes_no_label_dict[answer['yes_no_answer']]
             level_label = level_label_dict[answer['level']]
             sentence_indices = answer['sentence_indices']
             sentence_indices_new = []
@@ -452,8 +454,11 @@ def hotpot_convert_examples_to_features_without_process(examples, tokenizer, max
             for span_sentence in span_sentence_indice:
                 sentence_tok_start = span_sentence[0] - span_start + span_query_length
                 sentence_tok_end = span_sentence[1] - span_start + span_query_length
-                assert sentence_tok_start <= max_seq_length
-                assert sentence_tok_end <= max_seq_length
+                try:
+                    assert sentence_tok_start <= max_seq_length
+                    assert sentence_tok_end <= max_seq_length
+                except:
+                    raise ValueError('sentence tok end > max_seq_length!')
                 if sentence_tok_start > sentence_tok_end:
                     print('sentence start > sentence end!')
                 span_sentence_new_indice.append([sentence_tok_start, sentence_tok_end])
@@ -524,11 +529,14 @@ def hotpot_convert_examples_to_features_without_process(examples, tokenizer, max
                     end_position=end_position,
                     type_label=type_label,
                     level_label=level_label,
+                    yes_no_label=yes_no_label,
                     span_sentence_labels=span_sentence_labels[span_index],
                     span_sentence_is_max=span_sentence_is_max[span_index],
                     span_sentence_titles=span_sentence_titles[span_index],
                     span_sentence_indices=span_sentence_new_indices[span_index],
                     sentence_tok_indices=sentence_tok_indices,
+                    span_sentence_indices_in_paragraph=span_sentence_indices,
+                    sentence_token_indices=sentence_token_indices
                 )
             )
             unique_id += 1
@@ -572,6 +580,7 @@ def hotpot_convert_examples_to_features_without_process(examples, tokenizer, max
             all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
             all_sentence_labels = torch.tensor([f.span_sentence_labels for f in features], dtype=torch.long)
             all_type_labels = torch.tensor([f.type_label for f in features], dtype=torch.long)
+            all_yes_no_labels = torch.tensor([f.yes_no_label for f in features], dtype=torch.long)
             dataset = TensorDataset(
                 all_input_ids,
                 all_attention_masks,
@@ -583,6 +592,7 @@ def hotpot_convert_examples_to_features_without_process(examples, tokenizer, max
                 all_sentence_indices,
                 all_sentence_labels,
                 all_type_labels,
+                all_yes_no_labels,
             )
 
         return features, dataset
@@ -853,6 +863,7 @@ class HotpotProcessor(DataProcessor):
 
         if self.train_file is None:
             raise ValueError("HotpotProcessor should be instantiated via HotpotV1Processor or HopotV2Processor")
+        logging.info('train file is :{}'.format(os.path.join(data_dir, self.train_file if filename is None else filename)))
 
         with open(
             os.path.join(data_dir, self.train_file if filename is None else filename), "r", encoding="utf-8"
@@ -874,7 +885,7 @@ class HotpotProcessor(DataProcessor):
 
         if self.dev_file is None:
             raise ValueError("HotpotProcessor should be instantiated via HotpotV1Processor or HopotV2Processor")
-
+        logging.info('dev file path is {}'.format(os.path.join(data_dir, self.dev_file if filename is None else filename)))
         with open(
             os.path.join(data_dir, self.dev_file if filename is None else filename), "r", encoding="utf-8"
         ) as reader:
@@ -888,6 +899,8 @@ class HotpotProcessor(DataProcessor):
             title = entry["title"]
             for paragraph in entry["paragraphs"]:
                 context_text = paragraph["context"]
+                sentence_indices = paragraph['sentence_indices']
+                sentence_titles = paragraph['sentence_titles']
                 for qa in paragraph["qas"]:
                     qas_id = qa["id"]
                     question_text = qa["question"]
@@ -914,6 +927,8 @@ class HotpotProcessor(DataProcessor):
                         title=title,
                         is_impossible=is_impossible,
                         answers=answers,
+                        sentence_indices=sentence_indices,
+                        sentence_titles=sentence_titles,
                     )
 
                     examples.append(example)
@@ -953,6 +968,8 @@ class HotpotExample(object):
         answer_text,
         start_position_character,
         title,
+        sentence_indices,
+        sentence_titles,
         answers=[],
         is_impossible=False,
     ):
@@ -962,7 +979,9 @@ class HotpotExample(object):
         self.answer_text = answer_text
         self.title = title
         self.is_impossible = is_impossible
-        self.answers = answers
+        self.answers = answers[:]
+        self.sentence_indices=sentence_indices[:]
+        self.sentence_titles=sentence_titles[:]
 
         self.start_position, self.end_position = 0, 0
 
@@ -1039,8 +1058,10 @@ class HotpotFeatures(object):
         sentence_tok_indices,
         type_label=None,
         level_label=None,
+        yes_no_label=None,
         span_sentence_labels=None,
-
+        span_sentence_indices_in_paragraph=None,
+        sentence_token_indices=None,
 
     ):
         self.input_ids = input_ids
@@ -1060,12 +1081,15 @@ class HotpotFeatures(object):
         self.end_position = end_position
 
         self.type_label = type_label
+        self.yes_no_label = yes_no_label
         self.level_label = level_label
         self.span_sentence_labels = span_sentence_labels[:]
         self.span_sentence_is_max = span_sentence_is_max[:]
         self.span_sentence_titles = span_sentence_titles[:]
         self.span_sentence_indices = span_sentence_indices[:]
         self.sentence_tok_indices = sentence_tok_indices[:]
+        self.span_sentence_indices_in_paragraph=span_sentence_indices_in_paragraph[:]
+        self.sentence_token_indices = sentence_token_indices[:]
 
 
 class HotpotResult(object):
@@ -1078,13 +1102,14 @@ class HotpotResult(object):
         end_logits: The logits corresponding to the end of the answer
     """
 
-    def __init__(self, unique_id, start_logits, end_logits, type_logits, sentence_logits,
+    def __init__(self, unique_id, start_logits, end_logits, type_logits, sentence_logits, yes_no_logits,
                  start_top_index=None, end_top_index=None, cls_logits=None):
         self.start_logits = start_logits
         self.end_logits = end_logits
         self.unique_id = unique_id
         self.type_logit = type_logits
         self.sentence_logits = sentence_logits
+        self.yes_no_logits = yes_no_logits
 
         if start_top_index:
             self.start_top_index = start_top_index
