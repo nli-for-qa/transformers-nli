@@ -228,15 +228,15 @@ class Race2NLIProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json"), "train"))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json")), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json"), "dev"))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json"), "test"))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")) , "test")
 
     def get_labels(self):
         """See base class."""
