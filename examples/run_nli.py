@@ -85,11 +85,25 @@ ALL_MODELS = sum(
     (),
 )
 
+class RobertaTokenizerRev(RobertaTokenizer):
+    def truncate_sequences(
+        self, ids, pair_ids=None, num_tokens_to_remove=0, truncation_strategy="longest_first", stride=0
+    ):
+        ids.reverse()
+        if pair_ids is not None:
+            pair_ids.reverse()
+        ids, pair_ids, overflowing_tokens = super().truncate_sequences(ids, pair_ids, num_tokens_to_remove=num_tokens_to_remove, truncation_strategy=truncation_strategy, stride=stride)
+        ids.reverse()
+        if pair_ids is not None:
+            pair_ids.reverse()
+        overflowing_tokens.reverse()
+        return (ids, pair_ids, overflowing_tokens)
+
 MODEL_CLASSES = {
     "bert": (BertConfig, BertForSequenceClassification, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
-    "roberta": (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
+    "roberta": (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizerRev),
     "distilbert": (DistilBertConfig, DistilBertForSequenceClassification, DistilBertTokenizer),
     "albert": (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
     "xlmroberta": (XLMRobertaConfig, XLMRobertaForSequenceClassification, XLMRobertaTokenizer),
