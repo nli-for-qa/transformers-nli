@@ -772,6 +772,7 @@ class PreTrainedTokenizer(object):
         truncation_strategy="longest_first",
         pad_to_max_length=False,
         return_tensors=None,
+        truncate_from_end=False,
         **kwargs
     ):
         """
@@ -817,6 +818,7 @@ class PreTrainedTokenizer(object):
             truncation_strategy=truncation_strategy,
             pad_to_max_length=pad_to_max_length,
             return_tensors=return_tensors,
+            truncate_from_end=truncate_from_end,
             **kwargs,
         )
 
@@ -836,6 +838,7 @@ class PreTrainedTokenizer(object):
         return_attention_mask=True,
         return_overflowing_tokens=False,
         return_special_tokens_mask=False,
+        truncate_from_end=False,
         **kwargs
     ):
         """
@@ -925,6 +928,7 @@ class PreTrainedTokenizer(object):
             return_token_type_ids=return_token_type_ids,
             return_overflowing_tokens=return_overflowing_tokens,
             return_special_tokens_mask=return_special_tokens_mask,
+            truncate_from_end=truncate_from_end,
         )
 
     def batch_encode_plus(
@@ -937,6 +941,7 @@ class PreTrainedTokenizer(object):
         return_tensors=None,
         return_input_lengths=False,
         return_attention_masks=False,
+        truncate_from_end=False,
         **kwargs
     ):
         """
@@ -978,6 +983,7 @@ class PreTrainedTokenizer(object):
                 stride=stride,
                 truncation_strategy=truncation_strategy,
                 return_tensors=None,
+                truncate_from_end=truncate_from_end,
             )
 
             # Append the non-padded length to the output
@@ -1043,6 +1049,7 @@ class PreTrainedTokenizer(object):
         return_attention_mask=True,
         return_overflowing_tokens=False,
         return_special_tokens_mask=False,
+        truncate_from_end=False
     ):
         """
         Prepares a sequence of input id, or a pair of sequences of inputs ids so that it can be used by the model.
@@ -1114,6 +1121,7 @@ class PreTrainedTokenizer(object):
                 num_tokens_to_remove=total_len - max_length,
                 truncation_strategy=truncation_strategy,
                 stride=stride,
+                truncate_from_end=truncate_from_end,
             )
             if return_overflowing_tokens:
                 encoded_inputs["overflowing_tokens"] = overflowing_tokens
@@ -1215,7 +1223,7 @@ class PreTrainedTokenizer(object):
         return encoded_inputs
 
     def truncate_sequences(
-        self, ids, pair_ids=None, num_tokens_to_remove=0, truncation_strategy="longest_first", stride=0
+        self, ids, pair_ids=None, num_tokens_to_remove=0, truncation_strategy="longest_first", stride=0, truncate_from_end=False
     ):
         """Truncates a sequence pair in place to the maximum length.
             truncation_strategy: string selected in the following options:
@@ -1228,6 +1236,11 @@ class PreTrainedTokenizer(object):
         """
         if num_tokens_to_remove <= 0:
             return ids, pair_ids, []
+
+        if truncate_from_end:
+            ids.reverse()
+            if pair_ids is not None:
+                pair_ids.reverse()
 
         if truncation_strategy == "longest_first":
             overflowing_tokens = []
@@ -1256,6 +1269,12 @@ class PreTrainedTokenizer(object):
             raise ValueError(
                 "Truncation_strategy should be selected in ['longest_first', 'only_first', 'only_second', 'do_not_truncate']"
             )
+
+        if truncate_from_end:
+            ids.reverse()
+            if pair_ids is not None:
+                pair_ids.reverse()
+
         return (ids, pair_ids, overflowing_tokens)
 
     def create_token_type_ids_from_sequences(self, token_ids_0, token_ids_1=None):
