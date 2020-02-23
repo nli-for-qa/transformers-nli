@@ -17,6 +17,7 @@
 
 import logging
 import os
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -228,37 +229,30 @@ class Race2NLIProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json")), "train")
+        return self._create_examples(pd.read_json(os.path.join(data_dir, "train.json")), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json")), "dev")
+        return self._create_examples(pd.read_json(os.path.join(data_dir, "dev.json")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")) , "test")
+        return self._create_examples(pd.read_json(os.path.join(data_dir, "test.json")) , "test")
 
     def get_labels(self):
         """See base class."""
         return ["False", "True"]
 
-    def _create_examples(self, lines, type):
+    def _create_examples(self, data, type):
         """Creates examples for the training and dev sets."""
         examples = []
-        for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
-            guid = line[3]
-            text_a = line[6]
-            text_b = line[2]
-            label = line[4]
+        for (i, row) in data.iterrows():
+            guid = row['id']
+            text_a = row['premise']
+            text_b = row['hypothesis']
+            label = row['label']
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
-
-    def _read_json(self, input_file):
-        with open(input_file, "r", encoding="utf-8") as fin:
-            lines = fin.readlines()
-            return lines
 
 
 nli_tasks_num_labels = {
