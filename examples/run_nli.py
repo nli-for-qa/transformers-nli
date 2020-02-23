@@ -56,9 +56,9 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from transformers import nli_convert_examples_to_features as convert_examples_to_features
-from transformers import nli_output_modes as output_modes
-from transformers import nli_processors as processors
+from utils_nli import nli_convert_examples_to_features as convert_examples_to_features
+from utils_nli import nli_output_modes as output_modes
+from utils_nli import nli_processors as processors
 
 
 try:
