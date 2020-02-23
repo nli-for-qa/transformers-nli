@@ -55,7 +55,7 @@ from transformers import (
     XLNetTokenizer,
     get_linear_schedule_with_warmup,
 )
-from transformers import simple_accuracy
+
 from transformers import nli_convert_examples_to_features as convert_examples_to_features
 from transformers import nli_output_modes as output_modes
 from transformers import nli_processors as processors
@@ -102,6 +102,9 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
+
+def simple_accuracy(preds, labels):
+    return (preds == labels).mean()
 
 
 def train(args, train_dataset, model, tokenizer):
