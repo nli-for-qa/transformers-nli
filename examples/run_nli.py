@@ -362,6 +362,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             preds = np.squeeze(preds)
         # result = compute_metrics(eval_task, preds, out_label_ids)
         acc = simple_accuracy(preds, out_label_ids)
+        result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
