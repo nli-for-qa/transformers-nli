@@ -43,7 +43,7 @@ from transformers import (
     DistilBertTokenizer,
     RobertaConfig,
     RobertaForSequenceClassification,
-    RobertaForQuestionAnswering,
+    RobertaForMultipleChoice,
     RobertaTokenizer,
     XLMConfig,
     XLMForSequenceClassification,
@@ -105,7 +105,7 @@ MODEL_CLASSES = {
     "xlnet": (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     "roberta-nli": (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizerRev),
-    "roberta-qa": (RobertaConfig, RobertaForQuestionAnswering, RobertaTokenizerRev),
+    "roberta-qa": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizerRev),
     "distilbert": (DistilBertConfig, DistilBertForSequenceClassification, DistilBertTokenizer),
     "albert": (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
     "xlmroberta": (XLMRobertaConfig, XLMRobertaForSequenceClassification, XLMRobertaTokenizer),
@@ -437,9 +437,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
             all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
     elif task in ['race2nli']:
         all_input_ids = torch.tensor(select_field(features, "input_ids"), dtype=torch.long)
-        all_input_mask = torch.tensor(select_field(features, "input_mask"), dtype=torch.long)
-        all_segment_ids = torch.tensor(select_field(features, "segment_ids"), dtype=torch.long)
-        all_label_ids = torch.tensor([f.label for f in features], dtype=torch.long)
+        all_attention_mask = torch.tensor(select_field(features, "input_mask"), dtype=torch.long)
+        all_token_type_ids = torch.tensor(select_field(features, "segment_ids"), dtype=torch.long)
+        all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
     return dataset
