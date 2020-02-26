@@ -89,7 +89,8 @@ class RobertaTokenizerRev(RobertaTokenizer):
                            pair_ids=None,
                            num_tokens_to_remove=0,
                            truncation_strategy="longest_first",
-                           stride=0):
+                           stride=0,
+                           truncate_from_end=True):
         ids.reverse()
 
         if pair_ids is not None:
@@ -593,6 +594,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
             select_field(features, "segment_ids"), dtype=torch.long)
         all_labels = torch.tensor([f.label for f in features],
                                   dtype=torch.long)
+
+    dataset = TensorDataset(all_input_ids, all_attention_mask,
+                            all_token_type_ids, all_labels)
 
     return dataset
 
