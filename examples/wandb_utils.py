@@ -15,6 +15,7 @@ run = None
 
 def init(args: Any) -> None:
     wandb_run = None
+    fixed_ = dict(sync_tensorboard=True)
     tags = args.tags.split(',')
 
     if args.wandb and wandb_present:
@@ -25,14 +26,17 @@ def init(args: Any) -> None:
                 wandb_run = wandb.init(
                     name=args.wandb_run_name,
                     project=args.wandb_project,
-                    tags=tags)
+                    tags=tags,
+                    **fixed_)
             else:
-                wandb_run = wandb.init(project=args.wandb_project, tags=tags)
+                wandb_run = wandb.init(
+                    project=args.wandb_project, tags=tags, **fixed_)
         else:
             if args.wandb_run_name:
-                wandb_run = wandb.init(name=args.wandb_run_name, tags=tags)
+                wandb_run = wandb.init(
+                    name=args.wandb_run_name, tags=tags, **fixed_)
             else:
-                wandb_run = wandb.init(tags=tags)
+                wandb_run = wandb.init(tags=tags, **fixed_)
 
     return wandb_run
 
