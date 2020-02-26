@@ -69,8 +69,8 @@ class QA2NLIInputExample(object):
         specified for train and dev examples, but not for test examples.
     """
 
-    def __init__(self, guid, premise, options, label):
-        self.guid = guid
+    def __init__(self, example_id, premise, options, label):
+        self.example_id = example_id
         self.premise = premise
         self.options = options
         self.label = label
@@ -318,7 +318,7 @@ def qa2nli_convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         choices_features = []
-        for ending_idx, option in example.options:
+        for option in example.options:
             text_a = example.premise
             text_b = option
 
@@ -421,11 +421,11 @@ class QA2NLIProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for (i, row) in data.iterrows():
-            guid = row['id']
+            example_id = row['id']
             premise = row['premise']
             options = row['hypothesis_options']
             label = row['label']
-            examples.append(QA2NLIInputExample(guid=guid, premise=premise, options=options, label=label))
+            examples.append(QA2NLIInputExample(example_id=example_id, premise=premise, options=options, label=label))
         return examples
 
 nli_tasks_num_labels = {
