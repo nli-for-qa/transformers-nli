@@ -43,6 +43,7 @@ from transformers import (
     DistilBertTokenizer,
     RobertaConfig,
     RobertaForSequenceClassification,
+    RobertaForQuestionAnswering,
     RobertaTokenizer,
     XLMConfig,
     XLMForSequenceClassification,
@@ -103,7 +104,8 @@ MODEL_CLASSES = {
     "bert": (BertConfig, BertForSequenceClassification, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
-    "roberta": (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizerRev),
+    "roberta-nli": (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizerRev),
+    "roberta-qa": (RobertaConfig, RobertaForQuestionAnswering, RobertaTokenizerRev),
     "distilbert": (DistilBertConfig, DistilBertForSequenceClassification, DistilBertTokenizer),
     "albert": (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
     "xlmroberta": (XLMRobertaConfig, XLMRobertaForSequenceClassification, XLMRobertaTokenizer),
@@ -270,7 +272,8 @@ def train(args, train_dataset, model, tokenizer):
                     logging_loss = tr_loss
 
                     for key, value in logs.items():
-                        tb_writer.add_scalar(key, value, global_step)
+                        if np.isscalar(value):
+                            tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
