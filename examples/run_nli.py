@@ -122,6 +122,9 @@ def set_seed(args):
 def simple_accuracy(preds, labels):
     return (preds == labels).mean()
 
+def select_field(features, field):
+    return [[choice[field] for choice in feature.choices_features] for feature in features]
+
 
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
@@ -424,13 +427,19 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
     # Convert to Tensors and build dataset
-    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
-    if output_mode == "classification":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
-    elif output_mode == "regression":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+    if task in ['nli']:
+        all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
+        all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
+        all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+        if output_mode == "classification":
+            all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+    elif task in ['race2nli']:
+        all_input_ids = torch.tensor(select_field(features, "input_ids"), dtype=torch.long)
+        all_input_mask = torch.tensor(select_field(features, "input_mask"), dtype=torch.long)
+        all_segment_ids = torch.tensor(select_field(features, "segment_ids"), dtype=torch.long)
+        all_label_ids = torch.tensor([f.label for f in features], dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
     return dataset
