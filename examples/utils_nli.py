@@ -19,6 +19,8 @@ import logging
 import os
 import pandas as pd
 
+import tqdm
+
 logger = logging.getLogger(__name__)
 
 class NLIInputExample(object):
