@@ -161,7 +161,7 @@ def nli_convert_examples_to_features(
 
     return features
 
-class Race2NLIProcessor(DataProcessor):
+class RaceNLIProcessor(DataProcessor):
     """Processor for the RACE converted to NLI data set."""
 
     def get_example_from_tensor_dict(self, tensor_dict):
