@@ -57,7 +57,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from utils_nli import nli_convert_examples_to_features as convert_examples_to_features
+from utils_nli import convert_examples_to_features
 from utils_nli import nli_output_modes as output_modes
 from utils_nli import nli_processors as processors
 
@@ -406,7 +406,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         examples = (
             processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
         )
-        features = convert_examples_to_features(
+        features = convert_examples_to_features[task](
             examples,
             tokenizer,
             label_list=label_list,

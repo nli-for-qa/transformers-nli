@@ -35,10 +35,10 @@ class NLIInputExample(object):
         specified for train and dev examples, but not for test examples.
     """
 
-    def __init__(self, guid, text_a, text_b=None, label=None):
+    def __init__(self, guid, premise, hypothesis, label):
         self.guid = guid
-        self.text_a = text_a
-        self.text_b = text_b
+        self.premise = premise
+        self.hypothesis = hypothesis
         self.label = label
 
     def __repr__(self):
@@ -215,7 +215,7 @@ def nli_convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d/%d" % (ex_index, len(examples)))
 
-        inputs = tokenizer.encode_plus(example.text_a, example.text_b, add_special_tokens=True, max_length=max_length)
+        inputs = tokenizer.encode_plus(example.premise, example.hypothesis, add_special_tokens=True, max_length=max_length)
         input_ids, token_type_ids = inputs["input_ids"], inputs["token_type_ids"]
 
         # The mask has 1 for real tokens and 0 for padding tokens. Only real
@@ -439,4 +439,9 @@ nli_processors = {
 nli_output_modes = {
     "nli": "classification",
     "race2nli": "classification",
+}
+
+convert_examples_to_features = {
+    "nli": nli_convert_examples_to_features,
+    "race2nli": qa2nli_convert_examples_to_features,
 }
