@@ -310,7 +310,7 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix=""):
+def evaluate(args, model, tokenizer, prefix="", show_preds=False):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
     eval_outputs_dirs = (args.output_dir, args.output_dir + "-MM") if args.task_name == "mnli" else (args.output_dir,)
@@ -368,7 +368,10 @@ def evaluate(args, model, tokenizer, prefix=""):
             preds = np.squeeze(preds)
         # result = compute_metrics(eval_task, preds, out_label_ids)
         acc = simple_accuracy(preds, out_label_ids)
-        result = {"eval_acc": acc, "eval_loss": eval_loss, 'preds': list(zip(preds,out_label_ids))}
+        if show_preds:
+            result = {"eval_acc": acc, "eval_loss": eval_loss, 'preds': list(zip(preds,out_label_ids))}
+        else:
+            result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
 
         output_eval_file = os.path.join(eval_output_dir, prefix, "eval_results.txt")
@@ -713,7 +716,7 @@ def main():
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            result = evaluate(args, model, tokenizer, prefix=prefix)
+            result = evaluate(args, model, tokenizer, prefix=prefix, show_preds=True)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
