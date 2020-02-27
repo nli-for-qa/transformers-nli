@@ -965,9 +965,10 @@ def main():
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-
+            
             result = evaluate(args, model, tokenizer, prefix=prefix)
-            wandb_log(result, step=json.loads(global_step)["step"])
+            if global_step:
+                wandb_log(result, step=json.loads('{"'+global_step)["step"])
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
