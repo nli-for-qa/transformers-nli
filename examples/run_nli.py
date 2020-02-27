@@ -275,8 +275,8 @@ def train(args, train_dataset, model, tokenizer):
                     logging_loss = tr_loss
 
                     for key, value in logs.items():
-                        if np.isscalar(value):
-                            tb_writer.add_scalar(key, value, global_step)
+                        logger.info("  %s = %s", key, str(result[key]))
+                        tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
 
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
