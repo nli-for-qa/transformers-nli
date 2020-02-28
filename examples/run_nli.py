@@ -449,7 +449,7 @@ def evaluate(args, model, tokenizer, prefix="", show_preds=False):
         preds = None
         out_label_ids = None
 
-        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+        for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
 
@@ -965,10 +965,11 @@ def main():
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            
+
             result = evaluate(args, model, tokenizer, prefix=prefix)
+
             if global_step:
-                wandb_log(result, step=json.loads('{"'+global_step)["step"])
+                wandb_log(result, step=json.loads('{"' + global_step)["step"])
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
