@@ -20,8 +20,10 @@ import os
 import pandas as pd
 
 import tqdm
+import json
 
 logger = logging.getLogger(__name__)
+
 
 class NLIInputExample(object):
     """
@@ -49,11 +51,14 @@ class NLIInputExample(object):
     def to_dict(self):
         """Serializes this instance to a Python dictionary."""
         output = copy.deepcopy(self.__dict__)
+
         return output
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
+
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
+
 
 class QA2NLIInputExample(object):
     """
@@ -81,10 +86,12 @@ class QA2NLIInputExample(object):
     def to_dict(self):
         """Serializes this instance to a Python dictionary."""
         output = copy.deepcopy(self.__dict__)
+
         return output
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
+
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
 
@@ -101,7 +108,11 @@ class NLIInputFeatures(object):
         label: Label corresponding to the input
     """
 
-    def __init__(self, input_ids, attention_mask=None, token_type_ids=None, label=None):
+    def __init__(self,
+                 input_ids,
+                 attention_mask=None,
+                 token_type_ids=None,
+                 label=None):
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.token_type_ids = token_type_ids
@@ -113,20 +124,25 @@ class NLIInputFeatures(object):
     def to_dict(self):
         """Serializes this instance to a Python dictionary."""
         output = copy.deepcopy(self.__dict__)
+
         return output
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
+
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
+
 
 class QA2NLIInputFeatures(object):
     def __init__(self, example_id, choices_features, label):
         self.example_id = example_id
-        self.choices_features = [
-            {"input_ids": input_ids, "input_mask": input_mask, "segment_ids": segment_ids}
-            for input_ids, input_mask, segment_ids in choices_features
-        ]
+        self.choices_features = [{
+            "input_ids": input_ids,
+            "input_mask": input_mask,
+            "segment_ids": segment_ids
+        } for input_ids, input_mask, segment_ids in choices_features]
         self.label = label
+
 
 class DataProcessor(object):
     """Base class for data converters for sequence classification data sets."""
@@ -154,8 +170,10 @@ class DataProcessor(object):
     def tfds_map(self, example):
         """Some tensorflow_datasets datasets are not formatted the same way the GLUE datasets are.
         This method converts examples to the correct format."""
+
         if len(self.get_labels()) > 1:
             example.label = self.get_labels()[int(example.label)]
+
         return example
 
     @classmethod
@@ -166,16 +184,16 @@ class DataProcessor(object):
 
 
 def nli_convert_examples_to_features(
-    examples,
-    tokenizer,
-    max_length=512,
-    task=None,
-    label_list=None,
-    output_mode=None,
-    pad_on_left=False,
-    pad_token=0,
-    pad_token_segment_id=0,
-    mask_padding_with_zero=True,
+        examples,
+        tokenizer,
+        max_length=512,
+        task=None,
+        label_list=None,
+        output_mode=None,
+        pad_on_left=False,
+        pad_token=0,
+        pad_token_segment_id=0,
+        mask_padding_with_zero=True,
 ):
     """
     Loads a data file into a list of ``NLIInputFeatures``
@@ -203,22 +221,31 @@ def nli_convert_examples_to_features(
 
     if task is not None:
         processor = nli_processors[task]()
+
         if label_list is None:
             label_list = processor.get_labels()
             logger.info("Using label list %s for task %s" % (label_list, task))
+
         if output_mode is None:
             output_mode = nli_output_modes[task]
-            logger.info("Using output mode %s for task %s" % (output_mode, task))
+            logger.info(
+                "Using output mode %s for task %s" % (output_mode, task))
 
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
+
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d/%d" % (ex_index, len(examples)))
 
-        inputs = tokenizer.encode_plus(example.premise, example.hypothesis, add_special_tokens=True, max_length=max_length)
-        input_ids, token_type_ids = inputs["input_ids"], inputs["token_type_ids"]
+        inputs = tokenizer.encode_plus(
+            example.premise,
+            example.hypothesis,
+            add_special_tokens=True,
+            max_length=max_length)
+        input_ids, token_type_ids = inputs["input_ids"], inputs[
+            "token_type_ids"]
 
         # The mask has 1 for real tokens and 0 for padding tokens. Only real
         # tokens are attended to.
@@ -226,22 +253,29 @@ def nli_convert_examples_to_features(
 
         # Zero-pad up to the sequence length.
         padding_length = max_length - len(input_ids)
+
         if pad_on_left:
             input_ids = ([pad_token] * padding_length) + input_ids
-            attention_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + attention_mask
-            token_type_ids = ([pad_token_segment_id] * padding_length) + token_type_ids
+            attention_mask = ([0 if mask_padding_with_zero else 1]
+                              * padding_length) + attention_mask
+            token_type_ids = (
+                [pad_token_segment_id] * padding_length) + token_type_ids
         else:
             input_ids = input_ids + ([pad_token] * padding_length)
-            attention_mask = attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
-            token_type_ids = token_type_ids + ([pad_token_segment_id] * padding_length)
+            attention_mask = attention_mask + (
+                [0 if mask_padding_with_zero else 1] * padding_length)
+            token_type_ids = token_type_ids + (
+                [pad_token_segment_id] * padding_length)
 
-        assert len(input_ids) == max_length, "Error with input length {} vs {}".format(len(input_ids), max_length)
-        assert len(attention_mask) == max_length, "Error with input length {} vs {}".format(
-            len(attention_mask), max_length
-        )
-        assert len(token_type_ids) == max_length, "Error with input length {} vs {}".format(
-            len(token_type_ids), max_length
-        )
+        assert len(input_ids
+                   ) == max_length, "Error with input length {} vs {}".format(
+                       len(input_ids), max_length)
+        assert len(attention_mask
+                   ) == max_length, "Error with input length {} vs {}".format(
+                       len(attention_mask), max_length)
+        assert len(token_type_ids
+                   ) == max_length, "Error with input length {} vs {}".format(
+                       len(token_type_ids), max_length)
 
         if output_mode == "classification":
             label = label_map[example.label]
@@ -253,30 +287,35 @@ def nli_convert_examples_to_features(
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
-            logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-            logger.info("attention_mask: %s" % " ".join([str(x) for x in attention_mask]))
-            logger.info("token_type_ids: %s" % " ".join([str(x) for x in token_type_ids]))
+            logger.info(
+                "input_ids: %s" % " ".join([str(x) for x in input_ids]))
+            logger.info("attention_mask: %s" % " ".join(
+                [str(x) for x in attention_mask]))
+            logger.info("token_type_ids: %s" % " ".join(
+                [str(x) for x in token_type_ids]))
             logger.info("label: %s (id = %d)" % (example.label, label))
 
         features.append(
             NLIInputFeatures(
-                input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, label=label
-            )
-        )
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                label=label))
 
     return features
 
+
 def qa2nli_convert_examples_to_features(
-    examples,
-    tokenizer,
-    max_length=512,
-    task=None,
-    label_list=None,
-    output_mode=None,
-    pad_on_left=False,
-    pad_token=0,
-    pad_token_segment_id=0,
-    mask_padding_with_zero=True,
+        examples,
+        tokenizer,
+        max_length=512,
+        task=None,
+        label_list=None,
+        output_mode=None,
+        pad_on_left=False,
+        pad_token=0,
+        pad_token_segment_id=0,
+        mask_padding_with_zero=True,
 ):
     """
     Loads a data file into a list of ``QA2NLIInputFeatures``
@@ -304,133 +343,195 @@ def qa2nli_convert_examples_to_features(
 
     if task is not None:
         processor = nli_processors[task]()
+
         if label_list is None:
             label_list = processor.get_labels()
             logger.info("Using label list %s for task %s" % (label_list, task))
+
         if output_mode is None:
             output_mode = nli_output_modes[task]
-            logger.info("Using output mode %s for task %s" % (output_mode, task))
+            logger.info(
+                "Using output mode %s for task %s" % (output_mode, task))
 
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in tqdm.tqdm(enumerate(examples), desc="convert examples to features"):
+
+    for (ex_index, example) in tqdm.tqdm(
+            enumerate(examples), desc="convert examples to features"):
+
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         choices_features = []
+
         for option in example.options:
             text_a = example.premise
             text_b = option
 
-            inputs = tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
-            if "num_truncated_tokens" in inputs and inputs["num_truncated_tokens"] > 0:
+            inputs = tokenizer.encode_plus(
+                text_a,
+                text_b,
+                add_special_tokens=True,
+                max_length=max_length,
+            )
+
+            if "num_truncated_tokens" in inputs and inputs[
+                    "num_truncated_tokens"] > 0:
                 logger.info(
                     "Attention! you are cropping tokens (swag task is ok). "
                     "If you are training ARC and RACE and you are poping question + options,"
-                    "you need to try to use a bigger max seq length!"
-                )
+                    "you need to try to use a bigger max seq length!")
 
-            input_ids, token_type_ids = inputs["input_ids"], inputs["token_type_ids"]
+            input_ids, token_type_ids = inputs["input_ids"], inputs[
+                "token_type_ids"]
 
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
-            attention_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
+            attention_mask = [1 if mask_padding_with_zero else 0
+                              ] * len(input_ids)
 
             # Zero-pad up to the sequence length.
             padding_length = max_length - len(input_ids)
+
             if pad_on_left:
                 input_ids = ([pad_token] * padding_length) + input_ids
-                attention_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + attention_mask
-                token_type_ids = ([pad_token_segment_id] * padding_length) + token_type_ids
+                attention_mask = ([0 if mask_padding_with_zero else 1]
+                                  * padding_length) + attention_mask
+                token_type_ids = (
+                    [pad_token_segment_id] * padding_length) + token_type_ids
             else:
                 input_ids = input_ids + ([pad_token] * padding_length)
-                attention_mask = attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
-                token_type_ids = token_type_ids + ([pad_token_segment_id] * padding_length)
+                attention_mask = attention_mask + (
+                    [0 if mask_padding_with_zero else 1] * padding_length)
+                token_type_ids = token_type_ids + (
+                    [pad_token_segment_id] * padding_length)
 
             assert len(input_ids) == max_length
             assert len(attention_mask) == max_length
             assert len(token_type_ids) == max_length
-            choices_features.append((input_ids, attention_mask, token_type_ids))
+            choices_features.append((input_ids, attention_mask,
+                                     token_type_ids))
 
         label = label_map[example.label]
 
         if ex_index < 2:
             logger.info("*** Example ***")
             logger.info("race_id: {}".format(example.example_id))
-            for choice_idx, (input_ids, attention_mask, token_type_ids) in enumerate(choices_features):
+
+            for choice_idx, (input_ids, attention_mask,
+                             token_type_ids) in enumerate(choices_features):
                 logger.info("choice: {}".format(choice_idx))
-                logger.info("input_ids: {}".format(" ".join(map(str, input_ids))))
-                logger.info("attention_mask: {}".format(" ".join(map(str, attention_mask))))
-                logger.info("token_type_ids: {}".format(" ".join(map(str, token_type_ids))))
+                logger.info("input_ids: {}".format(" ".join(
+                    map(str, input_ids))))
+                logger.info("attention_mask: {}".format(" ".join(
+                    map(str, attention_mask))))
+                logger.info("token_type_ids: {}".format(" ".join(
+                    map(str, token_type_ids))))
                 logger.info("label: {}".format(label))
 
-        features.append(QA2NLIInputFeatures(example_id=example.example_id, choices_features=choices_features, label=label,))
+        features.append(
+            QA2NLIInputFeatures(
+                example_id=example.example_id,
+                choices_features=choices_features,
+                label=label,
+            ))
 
     return features
+
 
 class NLIProcessor(DataProcessor):
     """Processor for the RACE converted to NLI data set."""
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(pd.read_json(os.path.join(data_dir, "train.json")), "train")
+
+        return self._create_examples(
+            pd.read_json(os.path.join(data_dir, "train.json")), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(pd.read_json(os.path.join(data_dir, "dev.json")), "dev")
+
+        return self._create_examples(
+            pd.read_json(os.path.join(data_dir, "dev.json")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(pd.read_json(os.path.join(data_dir, "test.json")) , "test")
+
+        return self._create_examples(
+            pd.read_json(os.path.join(data_dir, "test.json")), "test")
 
     def get_labels(self):
         """See base class."""
+
         return [False, True]
 
     def _create_examples(self, data, type):
         """Creates examples for the training and dev sets."""
         examples = []
+
         for (i, row) in data.iterrows():
             guid = row['id']
             premise = row['premise']
             hypothesis = row['hypothesis']
             label = row['label']
-            examples.append(NLIInputExample(guid=guid, premise=premise, hypothesis=hypothesis, label=label))
+            examples.append(
+                NLIInputExample(
+                    guid=guid,
+                    premise=premise,
+                    hypothesis=hypothesis,
+                    label=label))
+
         return examples
+
 
 class QA2NLIProcessor(DataProcessor):
     """Processor for the RACE converted to NLI data set."""
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(pd.read_json(os.path.join(data_dir, "train.json")), "train")
+
+        return self._create_examples(
+            pd.read_json(os.path.join(data_dir, "train.json")), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(pd.read_json(os.path.join(data_dir, "dev.json")), "dev")
+
+        return self._create_examples(
+            pd.read_json(os.path.join(data_dir, "dev.json")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(pd.read_json(os.path.join(data_dir, "test.json")) , "test")
+
+        return self._create_examples(
+            pd.read_json(os.path.join(data_dir, "test.json")), "test")
 
     def get_labels(self):
         """See base class."""
+
         return [0, 1, 2, 3]
 
     def _create_examples(self, data, type):
         """Creates examples for the training and dev sets."""
         examples = []
+
         for (i, row) in data.iterrows():
             example_id = row['id']
             premise = row['premise']
             options = row['hypothesis_options']
             label = row['label']
-            examples.append(QA2NLIInputExample(example_id=example_id, premise=premise, options=options, label=label))
+            examples.append(
+                QA2NLIInputExample(
+                    example_id=example_id,
+                    premise=premise,
+                    options=options,
+                    label=label))
+
         return examples
 
+
 nli_tasks_num_labels = {
-    "nli" : 2,
-    "race2nli" : 4,
+    "nli": 2,
+    "race2nli": 4,
 }
 
 nli_processors = {
