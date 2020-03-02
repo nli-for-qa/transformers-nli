@@ -812,9 +812,11 @@ def main():
         help="comma seperated (no space) list of tags for the run")
 
     args = parser.parse_args()
-    args.tags = ','.join([args.task_name] + args.tags.split(","))
-    wandb_init(args)
-    args = reset_output_dir(args)
+
+    if args.wandb:
+        args.tags = ','.join([args.task_name] + args.tags.split(","))
+        wandb_init(args)
+        args = reset_output_dir(args)
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
