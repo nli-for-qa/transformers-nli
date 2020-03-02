@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import random
+import csv
 
 import numpy as np
 import torch
@@ -363,7 +364,7 @@ def train(args, train_dataset, model, tokenizer):
                     logging_loss = tr_loss
 
                     for key, value in logs.items():
-                        logger.info("  %s = %s", key, str(logs[key]))
+                        logger.info("  %s = %s", key, str(value))
                         tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
                     wandb_log({**logs, **{"step": global_step}})
@@ -410,7 +411,7 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix="", show_preds=False):
+def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (
         args.task_name, )
@@ -491,14 +492,13 @@ def evaluate(args, model, tokenizer, prefix="", show_preds=False):
         # result = compute_metrics(eval_task, preds, out_label_ids)
         acc = simple_accuracy(preds, out_label_ids)
 
-        if show_preds:
-            result = {
-                "eval_acc": acc,
-                "eval_loss": eval_loss,
-                'preds': list(zip(preds, out_label_ids))
-            }
-        else:
-            result = {"eval_acc": acc, "eval_loss": eval_loss}
+        if args.save_preds:
+            pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
+            with open(pref_file, "wb") as f:
+                writer = csv.writer(f)
+                writer.writerow(preds)
+        
+        result = {"eval_acc": acc, "eval_loss": eval_loss}
 
         results.update(result)
 
@@ -676,6 +676,11 @@ def main():
         "--do_eval",
         action="store_true",
         help="Whether to run eval on the dev set.")
+    parser.add_argument(
+        "--save_preds",
+        action="store_true",
+        help="Whether to save predictions."
+    )
     parser.add_argument(
         "--evaluate_during_training",
         action="store_true",
