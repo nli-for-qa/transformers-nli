@@ -21,6 +21,7 @@ import glob
 import logging
 import os
 import random
+import csv
 
 import numpy as np
 import torch
@@ -295,6 +296,13 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         eval_loss = eval_loss / nb_eval_steps
         preds = np.argmax(preds, axis=1)
         acc = simple_accuracy(preds, out_label_ids)
+        
+        if args.save_preds:
+            pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
+            with open(pref_file, "wb") as f:
+                writer = csv.writer(f)
+                writer.writerow(preds)
+
         result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
 
@@ -445,6 +453,11 @@ def main():
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the dev set.")
+    parser.add_argument(
+        "--save_preds",
+        action="store_true",
+        help="Whether to save predictions."
+    )
     parser.add_argument("--do_test", action="store_true", help="Whether to run test on the test set")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Run evaluation during training at each logging step."
