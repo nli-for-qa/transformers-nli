@@ -299,7 +299,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         
         if args.save_preds:
             pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
-            with open(pred_file, "wb") as f:
+            with open(pred_file, "w") as f:
                 writer = csv.writer(f)
                 writer.writerow(preds)
 
@@ -657,7 +657,7 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split("/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
@@ -675,7 +675,7 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split("/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
