@@ -494,7 +494,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
         if args.save_preds:
             pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
-            with open(pref_file, "wb") as f:
+            with open(pred_file, "wb") as f:
                 writer = csv.writer(f)
                 writer.writerow(preds)
         
