@@ -268,6 +268,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         nb_eval_steps = 0
         preds = None
         out_label_ids = None
+        examples = None
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
@@ -289,9 +290,11 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             if preds is None:
                 preds = logits.detach().cpu().numpy()
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
+                examples = inputs["input_ids"].detach().cpu().numpy()
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+                examples = np.append(examples, inputs["input_ids"].detach().cpu().numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
         preds = np.argmax(preds, axis=1)
@@ -301,7 +304,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
             with open(pred_file, "w") as f:
                 writer = csv.writer(f)
-                writer.writerow(preds)
+                writer.writerow(zip(examples, out_label_ids, preds))
 
         result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
