@@ -494,7 +494,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
         if args.save_preds:
             pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
-            with open(pred_file, "wb") as f:
+            with open(pred_file, "w") as f:
                 writer = csv.writer(f)
                 writer.writerow(preds)
         
@@ -968,7 +968,7 @@ def main():
             global_step = checkpoint.split(
                 "-")[-1] if len(checkpoints) > 1 else ""
             prefix = checkpoint.split(
-                "/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+                "/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
@@ -979,6 +979,24 @@ def main():
                 wandb_log(result, step=json.loads('{"' + global_step)["step"])
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
+            results.update(result)
+
+    if args.do_test and args.local_rank in [-1, 0]:
+        if not args.do_train:
+            args.output_dir = args.model_name_or_path
+        checkpoints = [args.output_dir]
+        # if args.eval_all_checkpoints: # can not use this to do test!!
+        #     checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
+        #     logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+        logger.info("Evaluate the following checkpoints: %s", checkpoints)
+        for checkpoint in checkpoints:
+            global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
+
+            model = model_class.from_pretrained(checkpoint)
+            model.to(args.device)
+            result = evaluate(args, model, tokenizer, prefix=prefix, test=True)
+            result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
     return results
