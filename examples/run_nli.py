@@ -367,7 +367,8 @@ def train(args, train_dataset, model, tokenizer):
                         logger.info("  %s = %s", key, str(value))
                         tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
-                    wandb_log({**logs, **{"step": global_step}})
+                    if args.wandb:
+                        wandb_log({**logs, **{"step": global_step}})
 
                 if args.local_rank in [
                         -1, 0
@@ -976,7 +977,7 @@ def main():
 
             result = evaluate(args, model, tokenizer, prefix=prefix)
 
-            if global_step:
+            if global_step and args.wandb:
                 wandb_log(result, step=json.loads('{"' + global_step)["step"])
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
