@@ -449,7 +449,7 @@ def evaluate(args, model, tokenizer, prefix="", show_preds=False):
         preds = None
         out_label_ids = None
 
-        for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
+        for batch in eval_dataloader:
             model.eval()
             batch = tuple(t.to(args.device) for t in batch)
 
@@ -711,6 +711,11 @@ def main():
         type=float,
         help="The initial learning rate for Adam.")
     parser.add_argument(
+        '--class_weights',
+        type=float,
+        nargs='+',
+        help='Class weights for loss calculation')
+    parser.add_argument(
         "--weight_decay",
         default=0.0,
         type=float,
@@ -896,6 +901,17 @@ def main():
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
+
+    # set class weights on the model
+
+    if hasattr(model, 'class_weights'):
+        model.class_weights = args.class_weights
+        logger.info(f'Set class weights to {model.class_weights}')
+    else:
+        if args.class_weights is not None:
+            logger.warn(
+                'Class weights supplied but model does not have attribute class_weights'
+            )
 
     if args.local_rank == 0:
         torch.distributed.barrier(
