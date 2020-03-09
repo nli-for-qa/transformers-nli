@@ -499,7 +499,7 @@ def evaluate(args, model, tokenizer, prefix=""):
                 writer = csv.writer(f)
                 writer.writerow(preds)
             score_file = os.path.join(eval_output_dir, prefix, "eval_scores.txt")
-            with open(pred_file, "w") as f:
+            with open(score_file, "w") as f:
                 writer = csv.writer(f)
                 writer.writerow(scores)
         
