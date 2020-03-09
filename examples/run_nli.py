@@ -448,7 +448,7 @@ def evaluate(args, model, tokenizer, prefix=""):
         logger.info("  Batch size = %d", args.eval_batch_size)
         eval_loss = 0.0
         nb_eval_steps = 0
-        preds = None
+        scores = None
         out_label_ids = None
 
         for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
@@ -474,11 +474,11 @@ def evaluate(args, model, tokenizer, prefix=""):
                 eval_loss += tmp_eval_loss.mean().item()
             nb_eval_steps += 1
 
-            if preds is None:
-                preds = logits.detach().cpu().numpy()
+            if scores is None:
+                scores = logits.detach().cpu().numpy()
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
             else:
-                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                scores = np.append(scores, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(
                     out_label_ids,
                     inputs["labels"].detach().cpu().numpy(),
@@ -487,9 +487,9 @@ def evaluate(args, model, tokenizer, prefix=""):
         eval_loss = eval_loss / nb_eval_steps
 
         if args.output_mode == "classification":
-            preds = np.argmax(preds, axis=1)
+            preds = np.argmax(scores, axis=1)
         elif args.output_mode == "regression":
-            preds = np.squeeze(preds)
+            preds = np.squeeze(scores)
         # result = compute_metrics(eval_task, preds, out_label_ids)
         acc = simple_accuracy(preds, out_label_ids)
 
@@ -497,7 +497,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
             with open(pred_file, "w") as f:
                 writer = csv.writer(f)
-                writer.writerow(preds)
+                writer.writerow(zip(preds, scores))
         
         result = {"eval_acc": acc, "eval_loss": eval_loss}
 
