@@ -497,7 +497,11 @@ def evaluate(args, model, tokenizer, prefix=""):
             pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
             with open(pred_file, "w") as f:
                 writer = csv.writer(f)
-                writer.writerow(zip(preds, scores))
+                writer.writerow(preds)
+            score_file = os.path.join(eval_output_dir, prefix, "eval_scores.txt")
+            with open(pred_file, "w") as f:
+                writer = csv.writer(f)
+                writer.writerow(scores)
         
         result = {"eval_acc": acc, "eval_loss": eval_loss}
 
