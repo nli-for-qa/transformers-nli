@@ -42,6 +42,7 @@ from transformers import (
     DistilBertTokenizer,
     RobertaConfig,
     RobertaForSequenceClassification,
+    RobertaForSequenceClassificationTwoClassWithSigmoid,
     RobertaForMultipleChoice,
     RobertaTokenizer,
     XLMConfig,
@@ -116,6 +117,9 @@ MODEL_CLASSES = {
     "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     "roberta-nli": (RobertaConfig, RobertaForSequenceClassification,
                     RobertaTokenizerRev),
+    "roberta-nli-sigmoid":
+    (RobertaConfig, RobertaForSequenceClassificationTwoClassWithSigmoid,
+     RobertaTokenizerRev),
     "roberta-qa": (RobertaConfig, RobertaForMultipleChoice,
                    RobertaTokenizerRev),
     "distilbert": (DistilBertConfig, DistilBertForSequenceClassification,
