@@ -419,12 +419,12 @@ class RobertaForSequenceClassification(BertPreTrainedModel):
                 loss_fct = MSELoss()
                 loss = loss_fct(logits.view(-1), labels.view(-1))
             else:
-                if self.label_weights:
+                if self.class_weights:
                     loss_fct = CrossEntropyLoss(
                         weight=torch.tensor(
                             self.class_weights,
-                            device=outputs.device,
-                            dtype=outputs.dtype))
+                            device=outputs[0].device,
+                            dtype=outputs[0].dtype))
                 else:
                     loss_fct = CrossEntropyLoss()
                 loss = loss_fct(
