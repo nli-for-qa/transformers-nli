@@ -397,6 +397,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
             tokenizer,
             pad_on_left=bool(args.model_type in ["xlnet"]),  # pad on the left for xlnet
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
+            no_passage = args.no_passage,
         )
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
@@ -491,6 +492,9 @@ def main():
     )
     parser.add_argument(
         "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
+    )
+    parser.add_argument(
+        "--no_passage", action="store_true", help="Set this flag if you training only using answer options. This can be used to validate model behavior and to check if options don't leak the answer."
     )
 
     parser.add_argument("--per_gpu_train_batch_size", default=8, type=int, help="Batch size per GPU/CPU for training.")

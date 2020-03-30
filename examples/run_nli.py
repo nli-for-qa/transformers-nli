@@ -566,6 +566,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
             pad_token=tokenizer.convert_tokens_to_ids(
                 [tokenizer.pad_token])[0],
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
+            no_passage = args.no_passage,
         )
 
         if args.local_rank in [-1, 0]:
@@ -700,6 +701,11 @@ def main():
         "--do_lower_case",
         action="store_true",
         help="Set this flag if you are using an uncased model.",
+    )
+    parser.add_argument(
+        "--no_passage", 
+        action="store_true", 
+        help="Set this flag if you training only using answer options. This can be used to validate model behavior and to check if options don't leak the answer."
     )
 
     parser.add_argument(
