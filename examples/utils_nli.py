@@ -240,9 +240,7 @@ def nli_convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d/%d" % (ex_index, len(examples)))
 
-        inputs = tokenizer.encode_plus(example.hypothesis,add_special_tokens=True,max_length=max_length) \
-                if no_passage \
-                else tokenizer.encode_plus(example.premise,example.hypothesis,add_special_tokens=True,max_length=max_length)
+        inputs = tokenizer.encode_plus(example.hypothesis,add_special_tokens=True,max_length=max_length) if no_passage else tokenizer.encode_plus(example.premise,example.hypothesis,add_special_tokens=True,max_length=max_length)
 
         input_ids, token_type_ids = inputs["input_ids"], inputs[
             "token_type_ids"]
