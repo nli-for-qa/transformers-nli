@@ -58,10 +58,37 @@ ALL_MODELS = sum(
     (tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, RobertaConfig)), ()
 )
 
+class RobertaTokenizerRev(RobertaTokenizer):
+    def truncate_sequences(self,
+                           ids,
+                           pair_ids=None,
+                           num_tokens_to_remove=0,
+                           truncation_strategy="longest_first",
+                           stride=0,
+                           truncate_from_end=True):
+        ids.reverse()
+
+        if pair_ids is not None:
+            pair_ids.reverse()
+        ids, pair_ids, overflowing_tokens = super().truncate_sequences(
+            ids,
+            pair_ids,
+            num_tokens_to_remove=num_tokens_to_remove,
+            truncation_strategy=truncation_strategy,
+            stride=stride)
+        ids.reverse()
+
+        if pair_ids is not None:
+            pair_ids.reverse()
+        overflowing_tokens.reverse()
+
+        return (ids, pair_ids, overflowing_tokens)
+
 MODEL_CLASSES = {
     "bert": (BertConfig, BertForMultipleChoice, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer),
     "roberta": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
+    "roberta-rev": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizerRev),
 }
 
 
