@@ -505,8 +505,7 @@ class RobertaForSequenceClassificationTwoClassWithSigmoid(
         x = self.dense(x)
         x = torch.tanh(x)
         x = self.dropout(x)
-        score = self.non_lin(self.out_proj(x))
-
+        score = self.non_lin(self.out_proj(x)).view(-1)
         neg_score = 1.0 - score
         logits = torch.stack((neg_score, score), dim=-1)
         outputs = (logits, ) + outputs[2:]
