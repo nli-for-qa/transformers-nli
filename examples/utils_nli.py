@@ -367,9 +367,7 @@ def qa2nli_convert_examples_to_features(
             text_a = example.premise
             text_b = option
 
-            inputs = tokenizer.encode_plus(text_b, add_special_tokens=True, max_length=max_length,)
-                    if no_passage
-                    else tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
+            inputs = tokenizer.encode_plus(text_b, add_special_tokens=True, max_length=max_length,) if no_passage else tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
 
             if "num_truncated_tokens" in inputs and inputs[
                     "num_truncated_tokens"] > 0:

@@ -148,6 +148,55 @@ class RaceProcessor(DataProcessor):
                 )
         return examples
 
+class RaceJsonProcessor(DataProcessor):
+    """Processor for the RACE data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} train".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json")))
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} dev".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json")))
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} test".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")))
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1", "2", "3"]
+
+    def _read_json(self, input_file):
+        with open(input_file, "r", encoding="utf-8") as fin:
+            lines = fin.readlines()
+            return lines
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (_, data_raw) in enumerate(lines):
+            race_id = "%s-%s" % (set_type, data_raw["race_id"])
+            article = data_raw["article"]
+            for i in range(len(data_raw["answers"])):
+                truth = str(ord(data_raw["answers"][i]) - ord("A"))
+                question = data_raw["questions"][i]
+                options = data_raw["options"][i]
+
+                examples.append(
+                    InputExample(
+                        example_id=race_id,
+                        question=question,
+                        contexts=[article, article, article, article],  # this is not efficient but convenient
+                        endings=[options[0], options[1], options[2], options[3]],
+                        label=truth,
+                    )
+                )
+        return examples
+
 
 class SwagProcessor(DataProcessor):
     """Processor for the SWAG data set."""
@@ -368,7 +417,7 @@ def convert_examples_to_features(
     return features
 
 
-processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor}
+processors = {"race_json":RaceJsonProcessor, "race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor}
 
 
 MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4}
