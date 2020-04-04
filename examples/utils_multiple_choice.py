@@ -175,7 +175,7 @@ class RaceJsonProcessor(DataProcessor):
             lines = fin.readlines()
             return lines
 
-    def _create_examples(self, lines, set_type):
+    def _create_examples(self, lines):
         """Creates examples for the training and dev sets."""
         examples = []
         for (_, data_raw) in enumerate(lines):
