@@ -178,7 +178,7 @@ class RaceJsonProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for _, data_raw in lines.iterrows():
-            race_id = "%s-%s" % (data_raw["id"])
+            race_id = "%s-%s" % (set_type, data_raw["id"])
             article = data_raw["article"]
             # for i in range(len(data_raw["answers"])):
             truth = str(ord(data_raw["answer"]) - ord("A"))
