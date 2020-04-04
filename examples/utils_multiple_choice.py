@@ -154,17 +154,17 @@ class RaceJsonProcessor(DataProcessor):
     def get_train_examples(self, data_dir):
         """See base class."""
         logger.info("LOOKING AT {} train".format(data_dir))
-        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json")))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json")), "train")
 
     def get_dev_examples(self, data_dir):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
-        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json")))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json")), "dev")
 
     def get_test_examples(self, data_dir):
         """See base class."""
         logger.info("LOOKING AT {} test".format(data_dir))
-        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")), "test")
 
     def get_labels(self):
         """See base class."""
@@ -175,7 +175,7 @@ class RaceJsonProcessor(DataProcessor):
             lines = fin.readlines()
             return lines
 
-    def _create_examples(self, lines):
+    def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
         for (_, data_raw) in enumerate(lines):
