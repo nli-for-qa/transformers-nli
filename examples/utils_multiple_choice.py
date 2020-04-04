@@ -179,21 +179,21 @@ class RaceJsonProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for (_, data_raw) in enumerate(lines):
-            race_id = "%s-%s" % (set_type, data_raw["race_id"])
+            race_id = "%s-%s" % (set_type, data_raw["id"])
             article = data_raw["article"]
-            for i in range(len(data_raw["answers"])):
-                truth = str(ord(data_raw["answers"][i]) - ord("A"))
-                question = data_raw["questions"][i]
-                options = data_raw["options"][i]
+            # for i in range(len(data_raw["answers"])):
+            truth = str(ord(data_raw["answer"]) - ord("A"))
+            question = data_raw["question"]
+            options = data_raw["options"]
 
-                examples.append(
-                    InputExample(
-                        example_id=race_id,
-                        question=question,
-                        contexts=[article, article, article, article],  # this is not efficient but convenient
-                        endings=[options[0], options[1], options[2], options[3]],
-                        label=truth,
-                    )
+            examples.append(
+                InputExample(
+                    example_id=race_id,
+                    question=question,
+                    contexts=[article, article, article, article],  # this is not efficient but convenient
+                    endings=[options[0], options[1], options[2], options[3]],
+                    label=truth,
+                )
                 )
         return examples
 
