@@ -22,7 +22,7 @@ import json
 import logging
 import os
 from typing import List
-import pandas
+import pandas as pd
 
 import tqdm
 
