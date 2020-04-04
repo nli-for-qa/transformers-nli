@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from typing import List
+import pandas
 
 import tqdm
 
@@ -171,15 +172,13 @@ class RaceJsonProcessor(DataProcessor):
         return ["0", "1", "2", "3"]
 
     def _read_json(self, input_file):
-        with open(input_file, "r", encoding="utf-8") as fin:
-            lines = fin.readlines()
-            return lines
+        return pd.read_json(input_file, orient='records')
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
-        for (_, data_raw) in enumerate(lines):
-            race_id = "%s-%s" % (set_type, data_raw["id"])
+        for _, data_raw in lines.iterrows():
+            race_id = "%s-%s" % (data_raw["id"])
             article = data_raw["article"]
             # for i in range(len(data_raw["answers"])):
             truth = str(ord(data_raw["answer"]) - ord("A"))
