@@ -118,7 +118,7 @@ def train(args, train_dataset, model, tokenizer):
                 str(args.max_seq_length), 
                 str(max(1,args.n_gpu)* args.gradient_accumulation_steps * args.per_gpu_train_batch_size),
                 str(args.learning_rate)]),
-            args.seed
+            str(args.seed)
             )
         tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
