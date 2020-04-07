@@ -835,7 +835,6 @@ def main():
         help="comma seperated (no space) list of tags for the run")
 
     args = parser.parse_args()
-    result_file = os.path.join(args.output_dir, prefix, "results.txt")
 
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
