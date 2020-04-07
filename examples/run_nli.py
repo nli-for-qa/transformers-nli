@@ -155,10 +155,12 @@ def train(args, train_dataset, model, tokenizer):
     if args.local_rank in [-1, 0]:
         tensorboard_log_dir = os.path.join("tensorboard", 
             args.task_name, 
+            args.data_dir,
             "_".join([args.model_name_or_path, 
                 str(args.max_seq_length), 
                 str(max(1,args.n_gpu)* args.gradient_accumulation_steps * args.per_gpu_train_batch_size),
-                str(args.learning_rate)])
+                str(args.learning_rate)]),
+            args.seed
             )
         tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
@@ -373,10 +375,14 @@ def train(args, train_dataset, model, tokenizer):
                     logs["train_loss"] = loss_scalar
                     logging_loss = tr_loss
 
+                    logger.info(
+                        "Performance at global step: %s",
+                        str(global_step),
+                    )
                     for key, value in logs.items():
                         logger.info("  %s = %s", key, str(value))
                         tb_writer.add_scalar(key, value, global_step)
-                    print(json.dumps({**logs, **{"step": global_step}}))
+                    # print(json.dumps({**logs, **{"step": global_step}}))
                     if args.wandb:
                         wandb_log({**logs, **{"step": global_step}})
 
