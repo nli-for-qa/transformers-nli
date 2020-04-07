@@ -240,7 +240,7 @@ def train(args, train_dataset, model, tokenizer):
                                     str(global_step),
                                 )
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
-                    tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
+                    tb_writer.add_scalar("train_loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
                     logger.info(
                         "Average loss: %s at global step: %s",
                         str((tr_loss - logging_loss) / args.logging_steps),

@@ -365,13 +365,12 @@ def train(args, train_dataset, model, tokenizer):
                         results = evaluate(args, model, tokenizer)
 
                         for key, value in results.items():
-                            eval_key = "eval_{}".format(key)
-                            logs[eval_key] = value
+                            logs[key] = value
 
                     loss_scalar = (tr_loss - logging_loss) / args.logging_steps
                     learning_rate_scalar = scheduler.get_lr()[0]
-                    logs["learning_rate"] = learning_rate_scalar
-                    logs["loss"] = loss_scalar
+                    logs["lr"] = learning_rate_scalar
+                    logs["train_loss"] = loss_scalar
                     logging_loss = tr_loss
 
                     for key, value in logs.items():
