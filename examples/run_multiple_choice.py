@@ -119,7 +119,7 @@ def train(args, train_dataset, model, tokenizer):
                 str(max(1,args.n_gpu)* args.gradient_accumulation_steps * args.per_gpu_train_batch_size),
                 str(args.learning_rate),
                 str(args.weight_decay),
-                str(args.warmup)]),
+                str(args.warmup_steps)]),
             str(args.seed)
             )
         print ("Tensorboard dir: ", tensorboard_log_dir)
