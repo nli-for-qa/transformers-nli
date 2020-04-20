@@ -194,6 +194,7 @@ def nli_convert_examples_to_features(
         pad_token=0,
         pad_token_segment_id=0,
         mask_padding_with_zero=True,
+        no_passage=False,
 ):
     """
     Loads a data file into a list of ``NLIInputFeatures``
@@ -239,11 +240,8 @@ def nli_convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d/%d" % (ex_index, len(examples)))
 
-        inputs = tokenizer.encode_plus(
-            example.premise,
-            example.hypothesis,
-            add_special_tokens=True,
-            max_length=max_length)
+        inputs = tokenizer.encode_plus(example.hypothesis,add_special_tokens=True,max_length=max_length) if no_passage else tokenizer.encode_plus(example.premise,example.hypothesis,add_special_tokens=True,max_length=max_length)
+
         input_ids, token_type_ids = inputs["input_ids"], inputs[
             "token_type_ids"]
 
@@ -316,6 +314,7 @@ def qa2nli_convert_examples_to_features(
         pad_token=0,
         pad_token_segment_id=0,
         mask_padding_with_zero=True,
+        no_passage=False,
 ):
     """
     Loads a data file into a list of ``QA2NLIInputFeatures``
@@ -368,12 +367,7 @@ def qa2nli_convert_examples_to_features(
             text_a = example.premise
             text_b = option
 
-            inputs = tokenizer.encode_plus(
-                text_a,
-                text_b,
-                add_special_tokens=True,
-                max_length=max_length,
-            )
+            inputs = tokenizer.encode_plus(text_b, add_special_tokens=True, max_length=max_length,) if no_passage else tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
 
             if "num_truncated_tokens" in inputs and inputs[
                     "num_truncated_tokens"] > 0:

@@ -21,6 +21,7 @@ import glob
 import logging
 import os
 import random
+import csv
 
 import numpy as np
 import torch
@@ -57,10 +58,37 @@ ALL_MODELS = sum(
     (tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, RobertaConfig)), ()
 )
 
+class RobertaTokenizerRev(RobertaTokenizer):
+    def truncate_sequences(self,
+                           ids,
+                           pair_ids=None,
+                           num_tokens_to_remove=0,
+                           truncation_strategy="longest_first",
+                           stride=0,
+                           truncate_from_end=True):
+        ids.reverse()
+
+        if pair_ids is not None:
+            pair_ids.reverse()
+        ids, pair_ids, overflowing_tokens = super().truncate_sequences(
+            ids,
+            pair_ids,
+            num_tokens_to_remove=num_tokens_to_remove,
+            truncation_strategy=truncation_strategy,
+            stride=stride)
+        ids.reverse()
+
+        if pair_ids is not None:
+            pair_ids.reverse()
+        overflowing_tokens.reverse()
+
+        return (ids, pair_ids, overflowing_tokens)
+
 MODEL_CLASSES = {
     "bert": (BertConfig, BertForMultipleChoice, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer),
     "roberta": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
+    "roberta-rev": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizerRev),
 }
 
 
@@ -295,6 +323,13 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         eval_loss = eval_loss / nb_eval_steps
         preds = np.argmax(preds, axis=1)
         acc = simple_accuracy(preds, out_label_ids)
+        
+        if args.save_preds:
+            pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
+            with open(pred_file, "w") as f:
+                writer = csv.writer(f)
+                writer.writerow(preds)
+
         result = {"eval_acc": acc, "eval_loss": eval_loss}
         results.update(result)
 
@@ -362,6 +397,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
             tokenizer,
             pad_on_left=bool(args.model_type in ["xlnet"]),  # pad on the left for xlnet
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
+            no_passage = args.no_passage,
         )
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
@@ -445,12 +481,20 @@ def main():
     )
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the dev set.")
+    parser.add_argument(
+        "--save_preds",
+        action="store_true",
+        help="Whether to save predictions."
+    )
     parser.add_argument("--do_test", action="store_true", help="Whether to run test on the test set")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Run evaluation during training at each logging step."
     )
     parser.add_argument(
         "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
+    )
+    parser.add_argument(
+        "--no_passage", action="store_true", help="Set this flag if you training only using answer options. This can be used to validate model behavior and to check if options don't leak the answer."
     )
 
     parser.add_argument("--per_gpu_train_batch_size", default=8, type=int, help="Batch size per GPU/CPU for training.")
@@ -644,7 +688,7 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split("/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
@@ -662,7 +706,7 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split("/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)

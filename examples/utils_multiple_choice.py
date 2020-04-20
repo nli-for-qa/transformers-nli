@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from typing import List
+import pandas as pd
 
 import tqdm
 
@@ -145,6 +146,53 @@ class RaceProcessor(DataProcessor):
                         endings=[options[0], options[1], options[2], options[3]],
                         label=truth,
                     )
+                )
+        return examples
+
+class RaceJsonProcessor(DataProcessor):
+    """Processor for the RACE data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} train".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.json")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} dev".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.json")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} test".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1", "2", "3"]
+
+    def _read_json(self, input_file):
+        return pd.read_json(input_file, orient='records')
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for _, data_raw in lines.iterrows():
+            race_id = "%s-%s" % (set_type, data_raw["id"])
+            article = data_raw["article"]
+            # for i in range(len(data_raw["answers"])):
+            truth = str(ord(data_raw["answer"]) - ord("A"))
+            question = data_raw["question"]
+            options = data_raw["options"]
+
+            examples.append(
+                InputExample(
+                    example_id=race_id,
+                    question=question,
+                    contexts=[article, article, article, article],  # this is not efficient but convenient
+                    endings=[options[0], options[1], options[2], options[3]],
+                    label=truth,
+                )
                 )
         return examples
 
@@ -300,6 +348,7 @@ def convert_examples_to_features(
     pad_on_left=False,
     pad_token=0,
     mask_padding_with_zero=True,
+    no_passage=False,
 ) -> List[InputFeatures]:
     """
     Loads a data file into a list of `InputFeatures`
@@ -320,7 +369,7 @@ def convert_examples_to_features(
             else:
                 text_b = example.question + " " + ending
 
-            inputs = tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
+            inputs = tokenizer.encode_plus(text_b, add_special_tokens=True, max_length=max_length,) if no_passage else tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
             if "num_truncated_tokens" in inputs and inputs["num_truncated_tokens"] > 0:
                 logger.info(
                     "Attention! you are cropping tokens (swag task is ok). "
@@ -367,7 +416,7 @@ def convert_examples_to_features(
     return features
 
 
-processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor}
+processors = {"race_json":RaceJsonProcessor, "race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor}
 
 
 MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4}
