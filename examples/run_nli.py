@@ -833,7 +833,7 @@ def main():
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args)
+        args = reset_output_dir(args) if not (args.do_eval or args.do_test) else args
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
@@ -982,18 +982,36 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
+            true_checkpoint=False
+            if checkpoint.find("checkpoint") != -1:
+                true_checkpoint =True
+            
             global_step = checkpoint.split(
-                "-")[-1] if len(checkpoints) > 1 else ""
+                "-")[-1] if true_checkpoint else ""
+            # if we find multiple checkpoints, means the output_dir is 
+            # parent of all ckpt dirs. We need the prefix then.
             prefix = checkpoint.split(
-                "/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
+                "/")[-1] if len(checkpoints) > 1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-
+            
             result = evaluate(args, model, tokenizer, prefix=prefix)
 
             if global_step and args.wandb:
-                wandb_log(result, step=json.loads('{"' + global_step)["step"])
+                step = None
+                logger.info(f"Global step type={type(global_step)}, value= {global_step}")
+                try:
+                    step = int(global_step)
+                except ValueError as e:
+                    logger.warning(e) 
+                    try:
+                        step = json.loads('{"' + global_step)["step"]
+                    except json.decoder.JSONDecodeError as je:
+                        logger.warning(je)
+                        logger.warning("not logging to wandb")
+                if step is not None:
+                    wandb_log(result, step=step)
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
