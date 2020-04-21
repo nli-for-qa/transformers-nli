@@ -48,10 +48,10 @@ train_examples = info.splits["train"].num_examples
 valid_examples = info.splits["validation"].num_examples
 
 # Prepare dataset for GLUE as a tf.data.Dataset instance
-train_dataset = glue_convert_examples_to_features(data["train"], tokenizer, 128, TASK)
+train_dataset = glue_convert_examples_to_features(data["train"], tokenizer, max_length=128, task=TASK)
 
 # MNLI expects either validation_matched or validation_mismatched
-valid_dataset = glue_convert_examples_to_features(data["validation"], tokenizer, 128, TASK)
+valid_dataset = glue_convert_examples_to_features(data["validation"], tokenizer, max_length=128, task=TASK)
 train_dataset = train_dataset.shuffle(128).batch(BATCH_SIZE).repeat(-1)
 valid_dataset = valid_dataset.batch(EVAL_BATCH_SIZE)
 
@@ -98,9 +98,6 @@ if TASK == "mrpc":
     sentence_2 = "His findings were not compatible with this research."
     inputs_1 = tokenizer.encode_plus(sentence_0, sentence_1, add_special_tokens=True, return_tensors="pt")
     inputs_2 = tokenizer.encode_plus(sentence_0, sentence_2, add_special_tokens=True, return_tensors="pt")
-
-    del inputs_1["special_tokens_mask"]
-    del inputs_2["special_tokens_mask"]
 
     pred_1 = pytorch_model(**inputs_1)[0].argmax().item()
     pred_2 = pytorch_model(**inputs_2)[0].argmax().item()

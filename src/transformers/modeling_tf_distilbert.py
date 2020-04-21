@@ -23,8 +23,9 @@ import numpy as np
 import tensorflow as tf
 
 from .configuration_distilbert import DistilBertConfig
-from .file_utils import add_start_docstrings
+from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_tf_utils import TFPreTrainedModel, TFSharedEmbeddings, get_initializer, shape_list
+from .tokenization_utils import BatchEncoding
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,10 @@ logger = logging.getLogger(__name__)
 TF_DISTILBERT_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "distilbert-base-uncased": "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-uncased-tf_model.h5",
     "distilbert-base-uncased-distilled-squad": "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-uncased-distilled-squad-tf_model.h5",
+    "distilbert-base-cased": "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-cased-tf_model.h5",
+    "distilbert-base-cased-distilled-squad": "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-cased-distilled-squad-tf_model.h5",
     "distilbert-base-multilingual-cased": "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-multilingual-cased-tf_model.h5",
+    "distilbert-base-uncased-finetuned-sst-2-english": "https://s3.amazonaws.com/models.huggingface.co/bert/distilbert-base-uncased-finetuned-sst-2-english-tf_model.h5",
 }
 
 
@@ -64,7 +68,7 @@ def gelu_new(x):
 
 class TFEmbeddings(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
-        super(TFEmbeddings, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.vocab_size = config.vocab_size
         self.dim = config.dim
         self.initializer_range = config.initializer_range
@@ -77,8 +81,6 @@ class TFEmbeddings(tf.keras.layers.Layer):
             embeddings_initializer=get_initializer(config.initializer_range),
             name="position_embeddings",
         )
-        if config.sinusoidal_pos_embds:
-            raise NotImplementedError
 
         self.LayerNorm = tf.keras.layers.LayerNormalization(epsilon=1e-12, name="LayerNorm")
         self.dropout = tf.keras.layers.Dropout(config.dropout)
@@ -91,7 +93,7 @@ class TFEmbeddings(tf.keras.layers.Layer):
             self.word_embeddings = self.add_weight(
                 "weight", shape=[self.vocab_size, self.dim], initializer=get_initializer(self.initializer_range)
             )
-        super(TFEmbeddings, self).build(input_shape)
+        super().build(input_shape)
 
     def call(self, inputs, inputs_embeds=None, mode="embedding", training=False):
         """Get token embeddings of inputs.
@@ -168,7 +170,7 @@ class TFEmbeddings(tf.keras.layers.Layer):
 
 class TFMultiHeadSelfAttention(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
-        super(TFMultiHeadSelfAttention, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.n_heads = config.n_heads
         self.dim = config.dim
@@ -258,7 +260,7 @@ class TFMultiHeadSelfAttention(tf.keras.layers.Layer):
 
 class TFFFN(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
-        super(TFFFN, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.dropout = tf.keras.layers.Dropout(config.dropout)
         self.lin1 = tf.keras.layers.Dense(
             config.hidden_dim, kernel_initializer=get_initializer(config.initializer_range), name="lin1"
@@ -283,7 +285,7 @@ class TFFFN(tf.keras.layers.Layer):
 
 class TFTransformerBlock(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
-        super(TFTransformerBlock, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.n_heads = config.n_heads
         self.dim = config.dim
@@ -337,7 +339,7 @@ class TFTransformerBlock(tf.keras.layers.Layer):
 
 class TFTransformer(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
-        super(TFTransformer, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.n_layers = config.n_layers
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
@@ -398,7 +400,7 @@ class TFTransformer(tf.keras.layers.Layer):
 
 class TFDistilBertMainLayer(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
-        super(TFDistilBertMainLayer, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.num_hidden_layers = config.num_hidden_layers
 
         self.embeddings = TFEmbeddings(config, name="embeddings")  # Embeddings
@@ -420,7 +422,7 @@ class TFDistilBertMainLayer(tf.keras.layers.Layer):
             head_mask = inputs[2] if len(inputs) > 2 else head_mask
             inputs_embeds = inputs[3] if len(inputs) > 3 else inputs_embeds
             assert len(inputs) <= 4, "Too many inputs."
-        elif isinstance(inputs, dict):
+        elif isinstance(inputs, (dict, BatchEncoding)):
             input_ids = inputs.get("input_ids")
             attention_mask = inputs.get("attention_mask", attention_mask)
             head_mask = inputs.get("head_mask", head_mask)
@@ -470,43 +472,28 @@ class TFDistilBertPreTrainedModel(TFPreTrainedModel):
 
 
 DISTILBERT_START_DOCSTRING = r"""
-    DistilBERT is a small, fast, cheap and light Transformer model
-    trained by distilling Bert base. It has 40% less parameters than
-    `bert-base-uncased`, runs 60% faster while preserving over 95% of
-    Bert's performances as measured on the GLUE language understanding benchmark.
-
-    Here are the differences between the interface of Bert and DistilBert:
-
-    - DistilBert doesn't have `token_type_ids`, you don't need to indicate which token belongs to which segment. Just separate your segments with the separation token `tokenizer.sep_token` (or `[SEP]`)
-    - DistilBert doesn't have options to select the input positions (`position_ids` input). This could be added if necessary though, just let's us know if you need this option.
-
-    For more information on DistilBERT, please refer to our
-    `detailed blog post`_
-
-    This model is a tf.keras.Model `tf.keras.Model`_ sub-class. Use it as a regular TF 2.0 Keras Model and
+    This model is a `tf.keras.Model <https://www.tensorflow.org/api_docs/python/tf/keras/Model>`__ sub-class.
+    Use it as a regular TF 2.0 Keras Model and
     refer to the TF 2.0 documentation for all matter related to general usage and behavior.
 
-    .. _`detailed blog post`:
-        https://medium.com/huggingface/distilbert-8cf3380435b5
+    .. note::
 
-    .. _`tf.keras.Model`:
-        https://www.tensorflow.org/versions/r2.0/api_docs/python/tf/keras/Model
-
-    Note on the model inputs:
         TF 2.0 models accepts two formats as inputs:
 
             - having all inputs as keyword arguments (like PyTorch models), or
             - having all inputs as a list, tuple or dict in the first positional arguments.
 
-        This second option is usefull when using `tf.keras.Model.fit()` method which currently requires having all the tensors in the first argument of the model call function: `model(inputs)`.
+        This second option is useful when using :obj:`tf.keras.Model.fit()` method which currently requires having
+        all the tensors in the first argument of the model call function: :obj:`model(inputs)`.
 
-        If you choose this second option, there are three possibilities you can use to gather all the input Tensors in the first positional argument :
+        If you choose this second option, there are three possibilities you can use to gather all the input Tensors
+        in the first positional argument :
 
-        - a single Tensor with input_ids only and nothing else: `model(inputs_ids)
+        - a single Tensor with input_ids only and nothing else: :obj:`model(inputs_ids)`
         - a list of varying length with one or several input Tensors IN THE ORDER given in the docstring:
-            `model([input_ids, attention_mask])` or `model([input_ids, attention_mask, token_type_ids])`
-        - a dictionary with one or several input Tensors associaed to the input names given in the docstring:
-            `model({'input_ids': input_ids, 'token_type_ids': token_type_ids})`
+          :obj:`model([input_ids, attention_mask])` or :obj:`model([input_ids, attention_mask, token_type_ids])`
+        - a dictionary with one or several input Tensors associated to the input names given in the docstring:
+          :obj:`model({'input_ids': input_ids, 'token_type_ids': token_type_ids})`
 
     Parameters:
         config (:class:`~transformers.DistilBertConfig`): Model configuration class with all the parameters of the model.
@@ -515,43 +502,61 @@ DISTILBERT_START_DOCSTRING = r"""
 """
 
 DISTILBERT_INPUTS_DOCSTRING = r"""
-    Inputs:
-        **input_ids** ``Numpy array`` or ``tf.Tensor`` of shape ``(batch_size, sequence_length)``:
+    Args:
+        input_ids (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary.
-            The input sequences should start with `[CLS]` and end with `[SEP]` tokens.
 
-            For now, ONLY BertTokenizer(`bert-base-uncased`) is supported and you should use this tokenizer when using DistilBERT.
-        **attention_mask**: (`optional`) ``Numpy array`` or ``tf.Tensor`` of shape ``(batch_size, sequence_length)``:
+            Indices can be obtained using :class:`transformers.BertTokenizer`.
+            See :func:`transformers.PreTrainedTokenizer.encode` and
+            :func:`transformers.PreTrainedTokenizer.encode_plus` for details.
+
+            `What are input IDs? <../glossary.html#input-ids>`__
+        attention_mask (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Mask to avoid performing attention on padding token indices.
             Mask values selected in ``[0, 1]``:
             ``1`` for tokens that are NOT MASKED, ``0`` for MASKED tokens.
-        **head_mask**: (`optional`) ``Numpy array`` or ``tf.Tensor`` of shape ``(num_heads,)`` or ``(num_layers, num_heads)``:
+
+            `What are attention masks? <../glossary.html#attention-mask>`__
+        head_mask (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(num_heads,)` or :obj:`(num_layers, num_heads)`, `optional`, defaults to :obj:`None`):
             Mask to nullify selected heads of the self-attention modules.
             Mask values selected in ``[0, 1]``:
-            ``1`` indicates the head is **not masked**, ``0`` indicates the head is **masked**.
-        **inputs_embeds**: (`optional`) ``Numpy array`` or ``tf.Tensor`` of shape ``(batch_size, sequence_length, embedding_dim)``:
-            Optionally, instead of passing ``input_ids`` you can choose to directly pass an embedded representation.
+            :obj:`1` indicates the head is **not masked**, :obj:`0` indicates the head is **masked**.
+        inputs_embeds (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length, embedding_dim)`, `optional`, defaults to :obj:`None`):
+            Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
             This is useful if you want more control over how to convert `input_ids` indices into associated vectors
             than the model's internal embedding lookup matrix.
+        training (:obj:`boolean`, `optional`, defaults to :obj:`False`):
+            Whether to activate dropout modules (if set to :obj:`True`) during training or to de-activate them
+            (if set to :obj:`False`) for evaluation.
+
 """
 
 
 @add_start_docstrings(
     "The bare DistilBERT encoder/transformer outputing raw hidden-states without any specific head on top.",
     DISTILBERT_START_DOCSTRING,
-    DISTILBERT_INPUTS_DOCSTRING,
 )
 class TFDistilBertModel(TFDistilBertPreTrainedModel):
-    r"""
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **last_hidden_state**: ``tf.Tensor`` of shape ``(batch_size, sequence_length, hidden_size)``
+    def __init__(self, config, *inputs, **kwargs):
+        super().__init__(config, *inputs, **kwargs)
+        self.distilbert = TFDistilBertMainLayer(config, name="distilbert")  # Embeddings
+
+    @add_start_docstrings_to_callable(DISTILBERT_INPUTS_DOCSTRING)
+    def call(self, inputs, **kwargs):
+        r"""
+    Returns:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers,DistilBertConfig`) and inputs:
+        last_hidden_state (:obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the output of the last layer of the model.
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``tf.Tensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
+        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when :obj:`config.output_hidden_states=True`):
+            tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``tf.Tensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
+        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_attentions=True``):
+            tuple of :obj:`tf.Tensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`:
+
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
 
     Examples::
@@ -559,26 +564,19 @@ class TFDistilBertModel(TFDistilBertPreTrainedModel):
         import tensorflow as tf
         from transformers import DistilBertTokenizer, TFDistilBertModel
 
-        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-cased')
+        model = TFDistilBertModel.from_pretrained('distilbert-base-cased')
         input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
         outputs = model(input_ids)
         last_hidden_states = outputs[0]  # The last hidden-state is the first element of the output tuple
-
-    """
-
-    def __init__(self, config, *inputs, **kwargs):
-        super(TFDistilBertModel, self).__init__(config, *inputs, **kwargs)
-        self.distilbert = TFDistilBertMainLayer(config, name="distilbert")  # Embeddings
-
-    def call(self, inputs, **kwargs):
+        """
         outputs = self.distilbert(inputs, **kwargs)
         return outputs
 
 
 class TFDistilBertLMHead(tf.keras.layers.Layer):
     def __init__(self, config, input_embeddings, **kwargs):
-        super(TFDistilBertLMHead, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.vocab_size = config.vocab_size
 
         # The output weights are the same as the input embeddings, but there is
@@ -587,7 +585,7 @@ class TFDistilBertLMHead(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         self.bias = self.add_weight(shape=(self.vocab_size,), initializer="zeros", trainable=True, name="bias")
-        super(TFDistilBertLMHead, self).build(input_shape)
+        super().build(input_shape)
 
     def call(self, hidden_states):
         hidden_states = self.input_embeddings(hidden_states, mode="linear")
@@ -596,38 +594,11 @@ class TFDistilBertLMHead(tf.keras.layers.Layer):
 
 
 @add_start_docstrings(
-    """DistilBert Model with a `masked language modeling` head on top. """,
-    DISTILBERT_START_DOCSTRING,
-    DISTILBERT_INPUTS_DOCSTRING,
+    """DistilBert Model with a `masked language modeling` head on top. """, DISTILBERT_START_DOCSTRING,
 )
 class TFDistilBertForMaskedLM(TFDistilBertPreTrainedModel):
-    r"""
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **prediction_scores**: ``tf.Tensor`` of shape ``(batch_size, sequence_length, config.vocab_size)``
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``tf.Tensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``tf.Tensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        import tensorflow as tf
-        from transformers import DistilBertTokenizer, TFDistilBertForMaskedLM
-
-        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        model = TFDistilBertForMaskedLM.from_pretrained('distilbert-base-uncased')
-        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
-        outputs = model(input_ids)
-        prediction_scores = outputs[0]
-
-    """
-
     def __init__(self, config, *inputs, **kwargs):
-        super(TFDistilBertForMaskedLM, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
         self.vocab_size = config.vocab_size
@@ -643,7 +614,37 @@ class TFDistilBertForMaskedLM(TFDistilBertPreTrainedModel):
     def get_output_embeddings(self):
         return self.vocab_projector.input_embeddings
 
+    @add_start_docstrings_to_callable(DISTILBERT_INPUTS_DOCSTRING)
     def call(self, inputs, **kwargs):
+        r"""
+
+    Returns:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers,DistilBertConfig`) and inputs:
+        prediction_scores (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
+            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
+        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when :obj:`config.output_hidden_states=True`):
+            tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_attentions=True``):
+            tuple of :obj:`tf.Tensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`:
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        import tensorflow as tf
+        from transformers import DistilBertTokenizer, TFDistilBertForMaskedLM
+
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-cased')
+        model = TFDistilBertForMaskedLM.from_pretrained('distilbert-base-cased')
+        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
+        outputs = model(input_ids)
+        prediction_scores = outputs[0]
+
+        """
         distilbert_output = self.distilbert(inputs, **kwargs)
 
         hidden_states = distilbert_output[0]  # (bs, seq_length, dim)
@@ -658,38 +659,12 @@ class TFDistilBertForMaskedLM(TFDistilBertPreTrainedModel):
 
 @add_start_docstrings(
     """DistilBert Model transformer with a sequence classification/regression head on top (a linear layer on top of
-                         the pooled output) e.g. for GLUE tasks. """,
+    the pooled output) e.g. for GLUE tasks. """,
     DISTILBERT_START_DOCSTRING,
-    DISTILBERT_INPUTS_DOCSTRING,
 )
 class TFDistilBertForSequenceClassification(TFDistilBertPreTrainedModel):
-    r"""
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **logits**: ``tf.Tensor`` of shape ``(batch_size, config.num_labels)``
-            Classification (or regression if config.num_labels==1) scores (before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``tf.Tensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``tf.Tensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        import tensorflow as tf
-        from transformers import BertTokenizer, TFDistilBertForSequenceClassification
-
-        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        model = TFDistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased')
-        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
-        outputs = model(input_ids)
-        logits = outputs[0]
-
-    """
-
     def __init__(self, config, *inputs, **kwargs):
-        super(TFDistilBertForSequenceClassification, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.num_labels = config.num_labels
 
         self.distilbert = TFDistilBertMainLayer(config, name="distilbert")
@@ -704,7 +679,36 @@ class TFDistilBertForSequenceClassification(TFDistilBertPreTrainedModel):
         )
         self.dropout = tf.keras.layers.Dropout(config.seq_classif_dropout)
 
+    @add_start_docstrings_to_callable(DISTILBERT_INPUTS_DOCSTRING)
     def call(self, inputs, **kwargs):
+        r"""
+    Returns:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers,DistilBertConfig`) and inputs:
+        logits (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, config.num_labels)`):
+            Classification (or regression if config.num_labels==1) scores (before SoftMax).
+        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when :obj:`config.output_hidden_states=True`):
+            tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_attentions=True``):
+            tuple of :obj:`tf.Tensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`:
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        import tensorflow as tf
+        from transformers import DistilBertTokenizer, TFDistilBertForSequenceClassification
+
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-cased')
+        model = TFDistilBertForSequenceClassification.from_pretrained('distilbert-base-cased')
+        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
+        outputs = model(input_ids)
+        logits = outputs[0]
+
+        """
         distilbert_output = self.distilbert(inputs, **kwargs)
 
         hidden_state = distilbert_output[0]  # (bs, seq_len, dim)
@@ -721,32 +725,10 @@ class TFDistilBertForSequenceClassification(TFDistilBertPreTrainedModel):
     """DistilBert Model with a token classification head on top (a linear layer on top of
     the hidden-states output) e.g. for Named-Entity-Recognition (NER) tasks. """,
     DISTILBERT_START_DOCSTRING,
-    DISTILBERT_INPUTS_DOCSTRING,
 )
 class TFDistilBertForTokenClassification(TFDistilBertPreTrainedModel):
-    r"""
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **scores**: ``Numpy array`` or ``tf.Tensor`` of shape ``(batch_size, sequence_length, config.num_labels)``
-            Classification scores (before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``Numpy array`` or ``tf.Tensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``Numpy array`` or ``tf.Tensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-    Examples::
-        import tensorflow as tf
-        from transformers import DistilBertTokenizer, TFDistilBertForTokenClassification
-        tokenizer = DistilBertTokenizer.from_pretrained('bert-base-uncased')
-        model = TFDistilBertForTokenClassification.from_pretrained('bert-base-uncased')
-        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
-        outputs = model(input_ids)
-        scores = outputs[0]
-    """
-
     def __init__(self, config, *inputs, **kwargs):
-        super(TFDistilBertForTokenClassification, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.num_labels = config.num_labels
 
         self.distilbert = TFDistilBertMainLayer(config, name="distilbert")
@@ -755,7 +737,35 @@ class TFDistilBertForTokenClassification(TFDistilBertPreTrainedModel):
             config.num_labels, kernel_initializer=get_initializer(config.initializer_range), name="classifier"
         )
 
+    @add_start_docstrings_to_callable(DISTILBERT_INPUTS_DOCSTRING)
     def call(self, inputs, **kwargs):
+        r"""
+    Returns:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers,DistilBertConfig`) and inputs:
+        scores (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length, config.num_labels)`):
+            Classification scores (before SoftMax).
+        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when :obj:`config.output_hidden_states=True`):
+            tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_attentions=True``):
+            tuple of :obj:`tf.Tensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`:
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        import tensorflow as tf
+        from transformers import DistilBertTokenizer, TFDistilBertForTokenClassification
+
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-cased')
+        model = TFDistilBertForTokenClassification.from_pretrained('distilbert-base-cased')
+        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
+        outputs = model(input_ids)
+        scores = outputs[0]
+        """
         outputs = self.distilbert(inputs, **kwargs)
 
         sequence_output = outputs[0]
@@ -770,40 +780,12 @@ class TFDistilBertForTokenClassification(TFDistilBertPreTrainedModel):
 
 @add_start_docstrings(
     """DistilBert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
-                         the hidden-states output to compute `span start logits` and `span end logits`). """,
+    the hidden-states output to compute `span start logits` and `span end logits`). """,
     DISTILBERT_START_DOCSTRING,
-    DISTILBERT_INPUTS_DOCSTRING,
 )
 class TFDistilBertForQuestionAnswering(TFDistilBertPreTrainedModel):
-    r"""
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **start_scores**: ``tf.Tensor`` of shape ``(batch_size, sequence_length,)``
-            Span-start scores (before SoftMax).
-        **end_scores**: ``tf.Tensor`` of shape ``(batch_size, sequence_length,)``
-            Span-end scores (before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``tf.Tensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``tf.Tensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        import tensorflow as tf
-        from transformers import BertTokenizer, TFDistilBertForQuestionAnswering
-
-        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        model = TFDistilBertForQuestionAnswering.from_pretrained('distilbert-base-uncased')
-        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
-        outputs = model(input_ids)
-        start_scores, end_scores = outputs[:2]
-
-    """
-
     def __init__(self, config, *inputs, **kwargs):
-        super(TFDistilBertForQuestionAnswering, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
 
         self.distilbert = TFDistilBertMainLayer(config, name="distilbert")
         self.qa_outputs = tf.keras.layers.Dense(
@@ -812,7 +794,38 @@ class TFDistilBertForQuestionAnswering(TFDistilBertPreTrainedModel):
         assert config.num_labels == 2
         self.dropout = tf.keras.layers.Dropout(config.qa_dropout)
 
+    @add_start_docstrings_to_callable(DISTILBERT_INPUTS_DOCSTRING)
     def call(self, inputs, **kwargs):
+        r"""
+    Return:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers,DistilBertConfig`) and inputs:
+        start_scores (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length,)`):
+            Span-start scores (before SoftMax).
+        end_scores (:obj:`Numpy array` or :obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length,)`):
+            Span-end scores (before SoftMax).
+        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when :obj:`config.output_hidden_states=True`):
+            tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_attentions=True``):
+            tuple of :obj:`tf.Tensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`:
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
+
+    Examples::
+
+        import tensorflow as tf
+        from transformers import DistilBertTokenizer, TFDistilBertForQuestionAnswering
+
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-cased')
+        model = TFDistilBertForQuestionAnswering.from_pretrained('distilbert-base-cased')
+        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute"))[None, :]  # Batch size 1
+        outputs = model(input_ids)
+        start_scores, end_scores = outputs[:2]
+
+        """
         distilbert_output = self.distilbert(inputs, **kwargs)
 
         hidden_states = distilbert_output[0]  # (bs, max_query_len, dim)

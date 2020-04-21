@@ -109,7 +109,7 @@ class XxxTokenizer(PreTrainedTokenizer):
                 Whether to lower case the input
                 Only has an effect when do_basic_tokenize=True
         """
-        super(XxxTokenizer, self).__init__(
+        super().__init__(
             unk_token=unk_token,
             sep_token=sep_token,
             pad_token=pad_token,
@@ -117,8 +117,6 @@ class XxxTokenizer(PreTrainedTokenizer):
             mask_token=mask_token,
             **kwargs,
         )
-        self.max_len_single_sentence = self.max_len - 2  # take into account special tokens
-        self.max_len_sentences_pair = self.max_len - 3  # take into account special tokens
 
         if not os.path.isfile(vocab_file):
             raise ValueError(
