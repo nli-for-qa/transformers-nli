@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import random
+import csv
 
 import numpy as np
 import torch
@@ -115,8 +116,12 @@ MODEL_CLASSES = {
     "xlnet": (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     "roberta-nli": (RobertaConfig, RobertaForSequenceClassification,
-                    RobertaTokenizerRev),
+                    RobertaTokenizer),
     "roberta-qa": (RobertaConfig, RobertaForMultipleChoice,
+                   RobertaTokenizer),
+    "roberta-nli-rev": (RobertaConfig, RobertaForSequenceClassification,
+                    RobertaTokenizerRev),
+    "roberta-qa-rev": (RobertaConfig, RobertaForMultipleChoice,
                    RobertaTokenizerRev),
     "distilbert": (DistilBertConfig, DistilBertForSequenceClassification,
                    DistilBertTokenizer),
@@ -363,10 +368,11 @@ def train(args, train_dataset, model, tokenizer):
                     logging_loss = tr_loss
 
                     for key, value in logs.items():
-                        if np.isscalar(value):
-                            tb_writer.add_scalar(key, value, global_step)
+                        logger.info("  %s = %s", key, str(value))
+                        tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
-                    wandb_log({**logs, **{"step": global_step}})
+                    if args.wandb:
+                        wandb_log({**logs, **{"step": global_step}})
 
                 if args.local_rank in [
                         -1, 0
@@ -410,7 +416,7 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix="", show_preds=False):
+def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (
         args.task_name, )
@@ -446,7 +452,7 @@ def evaluate(args, model, tokenizer, prefix="", show_preds=False):
         logger.info("  Batch size = %d", args.eval_batch_size)
         eval_loss = 0.0
         nb_eval_steps = 0
-        preds = None
+        scores = None
         out_label_ids = None
 
         for batch in eval_dataloader:
@@ -472,11 +478,11 @@ def evaluate(args, model, tokenizer, prefix="", show_preds=False):
                 eval_loss += tmp_eval_loss.mean().item()
             nb_eval_steps += 1
 
-            if preds is None:
-                preds = logits.detach().cpu().numpy()
+            if scores is None:
+                scores = logits.detach().cpu().numpy()
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
             else:
-                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                scores = np.append(scores, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(
                     out_label_ids,
                     inputs["labels"].detach().cpu().numpy(),
@@ -485,20 +491,23 @@ def evaluate(args, model, tokenizer, prefix="", show_preds=False):
         eval_loss = eval_loss / nb_eval_steps
 
         if args.output_mode == "classification":
-            preds = np.argmax(preds, axis=1)
+            preds = np.argmax(scores, axis=1)
         elif args.output_mode == "regression":
-            preds = np.squeeze(preds)
+            preds = np.squeeze(scores)
         # result = compute_metrics(eval_task, preds, out_label_ids)
         acc = simple_accuracy(preds, out_label_ids)
 
-        if show_preds:
-            result = {
-                "eval_acc": acc,
-                "eval_loss": eval_loss,
-                'preds': list(zip(preds, out_label_ids))
-            }
-        else:
-            result = {"eval_acc": acc, "eval_loss": eval_loss}
+        if args.save_preds:
+            pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
+            with open(pred_file, "w") as f:
+                writer = csv.writer(f)
+                writer.writerow(preds)
+            score_file = os.path.join(eval_output_dir, prefix, "eval_scores.txt")
+            with open(score_file, "w") as f:
+                writer = csv.writer(f)
+                writer.writerow(scores)
+        
+        result = {"eval_acc": acc, "eval_loss": eval_loss}
 
         results.update(result)
 
@@ -557,6 +566,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
             pad_token=tokenizer.convert_tokens_to_ids(
                 [tokenizer.pad_token])[0],
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
+            no_passage = args.no_passage,
         )
 
         if args.local_rank in [-1, 0]:
@@ -676,6 +686,12 @@ def main():
         "--do_eval",
         action="store_true",
         help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_test", action="store_true", help="Whether to run test on the test set")
+    parser.add_argument(
+        "--save_preds",
+        action="store_true",
+        help="Whether to save predictions."
+    )
     parser.add_argument(
         "--evaluate_during_training",
         action="store_true",
@@ -685,6 +701,11 @@ def main():
         "--do_lower_case",
         action="store_true",
         help="Set this flag if you are using an uncased model.",
+    )
+    parser.add_argument(
+        "--no_passage", 
+        action="store_true", 
+        help="Set this flag if you training only using answer options. This can be used to validate model behavior and to check if options don't leak the answer."
     )
 
     parser.add_argument(
@@ -812,9 +833,11 @@ def main():
         help="comma seperated (no space) list of tags for the run")
 
     args = parser.parse_args()
-    args.tags = ','.join([args.task_name] + args.tags.split(","))
-    wandb_init(args)
-    args = reset_output_dir(args)
+
+    if args.wandb:
+        args.tags = ','.join([args.task_name] + args.tags.split(","))
+        wandb_init(args)
+        args = reset_output_dir(args) if not (args.do_eval or args.do_test) else args
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
@@ -974,20 +997,56 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
+            true_checkpoint=False
+            if checkpoint.find("checkpoint") != -1:
+                true_checkpoint =True
+            
             global_step = checkpoint.split(
-                "-")[-1] if len(checkpoints) > 1 else ""
+                "-")[-1] if true_checkpoint else ""
+            # if we find multiple checkpoints, means the output_dir is 
+            # parent of all ckpt dirs. We need the prefix then.
             prefix = checkpoint.split(
-                "/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+                "/")[-1] if len(checkpoints) > 1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-
+            
             result = evaluate(args, model, tokenizer, prefix=prefix)
 
-            if global_step:
-                wandb_log(result, step=json.loads('{"' + global_step)["step"])
+            if global_step and args.wandb:
+                step = None
+                logger.info(f"Global step type={type(global_step)}, value= {global_step}")
+                try:
+                    step = int(global_step)
+                except ValueError as e:
+                    logger.warning(e) 
+                    try:
+                        step = json.loads('{"' + global_step)["step"]
+                    except json.decoder.JSONDecodeError as je:
+                        logger.warning(je)
+                        logger.warning("not logging to wandb")
+                if step is not None:
+                    wandb_log(result, step=step)
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
+            results.update(result)
+
+    if args.do_test and args.local_rank in [-1, 0]:
+        if not args.do_train:
+            args.output_dir = args.model_name_or_path
+        checkpoints = [args.output_dir]
+        # if args.eval_all_checkpoints: # can not use this to do test!!
+        #     checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
+        #     logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+        logger.info("Evaluate the following checkpoints: %s", checkpoints)
+        for checkpoint in checkpoints:
+            global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
+
+            model = model_class.from_pretrained(checkpoint)
+            model.to(args.device)
+            result = evaluate(args, model, tokenizer, prefix=prefix, test=True)
+            result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
     return results
