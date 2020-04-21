@@ -144,15 +144,13 @@ from .tokenization_xlm_roberta import XLMRobertaTokenizer
 from .tokenization_xlnet import SPIECE_UNDERLINE, XLNetTokenizer
 from .training_args import TrainingArguments
 
-
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
-
 
 if is_sklearn_available():
     from .data import glue_compute_metrics, xnli_compute_metrics
 
-
 # Modeling
+
 if is_torch_available():
     from .modeling_utils import PreTrainedModel, prune_layer, Conv1D, top_k_top_p_filtering
     from .modeling_auto import (
@@ -243,6 +241,7 @@ if is_torch_available():
         RobertaForSequenceClassification,
         RobertaForMultipleChoice,
         RobertaForTokenClassification,
+        RobertaForSequenceClassificationTwoClassWithSigmoid,
         RobertaForQuestionAnswering,
         ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
@@ -320,8 +319,8 @@ if is_torch_available():
         get_linear_schedule_with_warmup,
     )
 
-
 # TensorFlow
+
 if is_tf_available():
     from .modeling_tf_utils import (
         TFPreTrainedModel,
@@ -490,10 +489,8 @@ if is_tf_available():
     # Optimization
     from .optimization_tf import WarmUp, create_optimizer, AdamWeightDecay, GradientAccumulator
 
-
 if not is_tf_available() and not is_torch_available():
     logger.warning(
         "Neither PyTorch nor TensorFlow >= 2.0 have been found."
         "Models won't be available and only tokenizers, configuration"
-        "and file/data utilities can be used."
-    )
+        "and file/data utilities can be used.")
