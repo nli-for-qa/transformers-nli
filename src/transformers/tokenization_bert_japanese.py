@@ -19,6 +19,7 @@ import collections
 import logging
 import os
 import unicodedata
+from typing import Optional
 
 from .tokenization_bert import BasicTokenizer, BertTokenizer, WordpieceTokenizer, load_vocab
 
@@ -89,6 +90,7 @@ class BertJapaneseTokenizer(BertTokenizer):
         pad_token="[PAD]",
         cls_token="[CLS]",
         mask_token="[MASK]",
+        mecab_kwargs=None,
         **kwargs
     ):
         """Constructs a MecabBertTokenizer.
@@ -106,6 +108,7 @@ class BertJapaneseTokenizer(BertTokenizer):
                 Type of word tokenizer.
             **subword_tokenizer_type**: (`optional`) string (default "wordpiece")
                 Type of subword tokenizer.
+            **mecab_kwargs**: (`optional`) dict passed to `MecabTokenizer` constructor (default None)
         """
         super(BertTokenizer, self).__init__(
             unk_token=unk_token,
@@ -115,8 +118,7 @@ class BertJapaneseTokenizer(BertTokenizer):
             mask_token=mask_token,
             **kwargs,
         )
-        self.max_len_single_sentence = self.max_len - 2  # take into account special tokens
-        self.max_len_sentences_pair = self.max_len - 3  # take into account special tokens
+        # ^^ We call the grandparent's init, not the parent's.
 
         if not os.path.isfile(vocab_file):
             raise ValueError(
@@ -133,7 +135,9 @@ class BertJapaneseTokenizer(BertTokenizer):
                     do_lower_case=do_lower_case, never_split=never_split, tokenize_chinese_chars=False
                 )
             elif word_tokenizer_type == "mecab":
-                self.word_tokenizer = MecabTokenizer(do_lower_case=do_lower_case, never_split=never_split)
+                self.word_tokenizer = MecabTokenizer(
+                    do_lower_case=do_lower_case, never_split=never_split, **(mecab_kwargs or {})
+                )
             else:
                 raise ValueError("Invalid word_tokenizer_type '{}' is specified.".format(word_tokenizer_type))
 
@@ -160,10 +164,10 @@ class BertJapaneseTokenizer(BertTokenizer):
         return split_tokens
 
 
-class MecabTokenizer(object):
+class MecabTokenizer:
     """Runs basic tokenization with MeCab morphological parser."""
 
-    def __init__(self, do_lower_case=False, never_split=None, normalize_text=True):
+    def __init__(self, do_lower_case=False, never_split=None, normalize_text=True, mecab_option: Optional[str] = None):
         """Constructs a MecabTokenizer.
 
         Args:
@@ -175,6 +179,7 @@ class MecabTokenizer(object):
                 List of token not to split.
             **normalize_text**: (`optional`) boolean (default True)
                 Whether to apply unicode normalization to text before tokenization.
+            **mecab_option**: (`optional`) string passed to `MeCab.Tagger` constructor (default "")
         """
         self.do_lower_case = do_lower_case
         self.never_split = never_split if never_split is not None else []
@@ -182,7 +187,7 @@ class MecabTokenizer(object):
 
         import MeCab
 
-        self.mecab = MeCab.Tagger()
+        self.mecab = MeCab.Tagger(mecab_option) if mecab_option is not None else MeCab.Tagger()
 
     def tokenize(self, text, never_split=None, **kwargs):
         """Tokenizes a piece of text."""
