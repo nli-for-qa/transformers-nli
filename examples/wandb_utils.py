@@ -37,7 +37,7 @@ def init(args: Any) -> None:
                     name=args.wandb_run_name, tags=tags, **fixed_)
             else:
                 wandb_run = wandb.init(tags=tags, **fixed_)
-    wandb.config.update(args)
+        wandb.config.update(args)
 
     return wandb_run
 
