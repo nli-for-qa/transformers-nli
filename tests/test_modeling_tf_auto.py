@@ -19,7 +19,7 @@ import unittest
 
 from transformers import is_tf_available
 
-from .utils import SMALL_MODEL_IDENTIFIER, require_tf, slow
+from .utils import DUMMY_UNKWOWN_IDENTIFIER, SMALL_MODEL_IDENTIFIER, require_tf, slow
 
 
 if is_tf_available():
@@ -28,8 +28,11 @@ if is_tf_available():
         BertConfig,
         TFAutoModel,
         TFBertModel,
+        TFAutoModelForPreTraining,
+        TFBertForPreTraining,
         TFAutoModelWithLMHead,
         TFBertForMaskedLM,
+        TFRobertaForMaskedLM,
         TFAutoModelForSequenceClassification,
         TFBertForSequenceClassification,
         TFAutoModelForQuestionAnswering,
@@ -55,6 +58,23 @@ class TFAutoModelTest(unittest.TestCase):
             model = TFAutoModel.from_pretrained(model_name)
             self.assertIsNotNone(model)
             self.assertIsInstance(model, TFBertModel)
+
+    @slow
+    def test_model_for_pretraining_from_pretrained(self):
+        import h5py
+
+        self.assertTrue(h5py.version.hdf5_version.startswith("1.10"))
+
+        logging.basicConfig(level=logging.INFO)
+        # for model_name in list(TF_BERT_PRETRAINED_MODEL_ARCHIVE_MAP.keys())[:1]:
+        for model_name in ["bert-base-uncased"]:
+            config = AutoConfig.from_pretrained(model_name)
+            self.assertIsNotNone(config)
+            self.assertIsInstance(config, BertConfig)
+
+            model = TFAutoModelForPreTraining.from_pretrained(model_name)
+            self.assertIsNotNone(model)
+            self.assertIsInstance(model, TFBertForPreTraining)
 
     @slow
     def test_lmhead_model_from_pretrained(self):
@@ -99,3 +119,12 @@ class TFAutoModelTest(unittest.TestCase):
         logging.basicConfig(level=logging.INFO)
         model = TFAutoModelWithLMHead.from_pretrained(SMALL_MODEL_IDENTIFIER)
         self.assertIsInstance(model, TFBertForMaskedLM)
+        self.assertEqual(model.num_parameters(), 14830)
+        self.assertEqual(model.num_parameters(only_trainable=True), 14830)
+
+    def test_from_identifier_from_model_type(self):
+        logging.basicConfig(level=logging.INFO)
+        model = TFAutoModelWithLMHead.from_pretrained(DUMMY_UNKWOWN_IDENTIFIER)
+        self.assertIsInstance(model, TFRobertaForMaskedLM)
+        self.assertEqual(model.num_parameters(), 14830)
+        self.assertEqual(model.num_parameters(only_trainable=True), 14830)

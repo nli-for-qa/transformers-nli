@@ -26,8 +26,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .configuration_transfo_xl import TransfoXLConfig
-from .file_utils import add_start_docstrings
-from .modeling_transfo_xl_utilities import LogUniformSampler, ProjectedAdaptiveLogSoftmax, sample_logits
+from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
+from .modeling_transfo_xl_utilities import ProjectedAdaptiveLogSoftmax
 from .modeling_utils import PreTrainedModel
 
 
@@ -136,7 +136,7 @@ def load_tf_weights_in_transfo_xl(model, config, tf_path):
         if "kernel" in name or "proj" in name:
             array = np.transpose(array)
         if ("r_r_bias" in name or "r_w_bias" in name) and len(pointer) > 1:
-            # Here we will split the TF weigths
+            # Here we will split the TF weights
             assert len(pointer) == array.shape[0]
             for i, p_i in enumerate(pointer):
                 arr_i = array[i, ...]
@@ -165,7 +165,7 @@ def load_tf_weights_in_transfo_xl(model, config, tf_path):
 
 class PositionalEmbedding(nn.Module):
     def __init__(self, demb):
-        super(PositionalEmbedding, self).__init__()
+        super().__init__()
 
         self.demb = demb
 
@@ -184,7 +184,7 @@ class PositionalEmbedding(nn.Module):
 
 class PositionwiseFF(nn.Module):
     def __init__(self, d_model, d_inner, dropout, pre_lnorm=False, layer_norm_epsilon=1e-5):
-        super(PositionwiseFF, self).__init__()
+        super().__init__()
 
         self.d_model = d_model
         self.d_inner = d_inner
@@ -236,7 +236,7 @@ class RelPartialLearnableMultiHeadAttn(nn.Module):
         output_attentions=False,
         layer_norm_epsilon=1e-5,
     ):
-        super(RelPartialLearnableMultiHeadAttn, self).__init__()
+        super().__init__()
 
         self.output_attentions = output_attentions
         self.n_head = n_head
@@ -368,7 +368,7 @@ class RelPartialLearnableMultiHeadAttn(nn.Module):
 
 class RelPartialLearnableDecoderLayer(nn.Module):
     def __init__(self, n_head, d_model, d_head, d_inner, dropout, layer_norm_epsilon=1e-5, **kwargs):
-        super(RelPartialLearnableDecoderLayer, self).__init__()
+        super().__init__()
 
         self.dec_attn = RelPartialLearnableMultiHeadAttn(
             n_head, d_model, d_head, dropout, layer_norm_epsilon=layer_norm_epsilon, **kwargs
@@ -389,7 +389,7 @@ class RelPartialLearnableDecoderLayer(nn.Module):
 
 class AdaptiveEmbedding(nn.Module):
     def __init__(self, n_token, d_embed, d_proj, cutoffs, div_val=1, sample_softmax=False):
-        super(AdaptiveEmbedding, self).__init__()
+        super().__init__()
 
         self.n_token = n_token
         self.d_embed = d_embed
@@ -508,21 +508,11 @@ class TransfoXLPreTrainedModel(PreTrainedModel):
                 self._init_bias(m.r_bias)
 
 
-TRANSFO_XL_START_DOCSTRING = r"""    The Transformer-XL model was proposed in
-    `Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context`_
-    by Zihang Dai*, Zhilin Yang*, Yiming Yang, Jaime Carbonell, Quoc V. Le, Ruslan Salakhutdinov.
-    It's a causal (uni-directional) transformer with relative positioning (sinusoïdal) embeddings which can reuse
-    previously computed hidden-states to attend to longer context (memory).
-    This model also uses adaptive softmax inputs and outputs (tied).
+TRANSFO_XL_START_DOCSTRING = r"""
 
-    This model is a PyTorch `torch.nn.Module`_ sub-class. Use it as a regular PyTorch Module and
-    refer to the PyTorch documentation for all matter related to general usage and behavior.
-
-    .. _`Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context`:
-        https://arxiv.org/abs/1901.02860
-
-    .. _`torch.nn.Module`:
-        https://pytorch.org/docs/stable/nn.html#module
+    This model is a PyTorch `torch.nn.Module <https://pytorch.org/docs/stable/nn.html#torch.nn.Module>`_ sub-class.
+    Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general
+    usage and behavior.
 
     Parameters:
         config (:class:`~transformers.TransfoXLConfig`): Model configuration class with all the parameters of the model.
@@ -531,24 +521,25 @@ TRANSFO_XL_START_DOCSTRING = r"""    The Transformer-XL model was proposed in
 """
 
 TRANSFO_XL_INPUTS_DOCSTRING = r"""
-    Inputs:
-        **input_ids**: ``torch.LongTensor`` of shape ``(batch_size, sequence_length)``:
+    Args:
+        input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary.
-            Transformer-XL is a model with relative position embeddings so you can either pad the inputs on
-            the right or on the left.
+
             Indices can be obtained using :class:`transformers.TransfoXLTokenizer`.
             See :func:`transformers.PreTrainedTokenizer.encode` and
-            :func:`transformers.PreTrainedTokenizer.convert_tokens_to_ids` for details.
-        **mems**: (`optional`)
-            list of ``torch.FloatTensor`` (one for each layer):
-            that contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
-            (see `mems` output below). Can be used to speed up sequential decoding and attend to longer context.
-        **head_mask**: (`optional`) ``torch.FloatTensor`` of shape ``(num_heads,)`` or ``(num_layers, num_heads)``:
+            :func:`transformers.PreTrainedTokenizer.encode_plus` for details.
+
+            `What are input IDs? <../glossary.html#input-ids>`__
+        mems (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
+            Contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
+            (see `mems` output below). Can be used to speed up sequential decoding. The token ids which have their mems
+            given to this model should not be passed as input ids as they have already been computed.
+        head_mask (:obj:`torch.FloatTensor` of shape :obj:`(num_heads,)` or :obj:`(num_layers, num_heads)`, `optional`, defaults to :obj:`None`):
             Mask to nullify selected heads of the self-attention modules.
             Mask values selected in ``[0, 1]``:
-            ``1`` indicates the head is **not masked**, ``0`` indicates the head is **masked**.
-        **inputs_embeds**: (`optional`) ``torch.FloatTensor`` of shape ``(batch_size, sequence_length, embedding_dim)``:
-            Optionally, instead of passing ``input_ids`` you can choose to directly pass an embedded representation.
+            :obj:`1` indicates the head is **not masked**, :obj:`0` indicates the head is **masked**.
+        input_embeds (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`, defaults to :obj:`None`):
+            Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
             This is useful if you want more control over how to convert `input_ids` indices into associated vectors
             than the model's internal embedding lookup matrix.
 """
@@ -557,37 +548,10 @@ TRANSFO_XL_INPUTS_DOCSTRING = r"""
 @add_start_docstrings(
     "The bare Bert Model transformer outputting raw hidden-states without any specific head on top.",
     TRANSFO_XL_START_DOCSTRING,
-    TRANSFO_XL_INPUTS_DOCSTRING,
 )
 class TransfoXLModel(TransfoXLPreTrainedModel):
-    r"""
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **last_hidden_state**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length, hidden_size)``
-            Sequence of hidden-states at the last layer of the model.
-        **mems**:
-            list of ``torch.FloatTensor`` (one for each layer):
-            that contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
-            (see `mems` input above). Can be used to speed up sequential decoding and attend to longer context.
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
-        model = TransfoXLModel.from_pretrained('transfo-xl-wt103')
-        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
-        outputs = model(input_ids)
-        last_hidden_states, mems = outputs[:2]
-
-    """
-
     def __init__(self, config):
-        super(TransfoXLModel, self).__init__(config)
+        super().__init__(config)
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
 
@@ -681,7 +645,7 @@ class TransfoXLModel(TransfoXLPreTrainedModel):
         else:
             return None
 
-    def _update_mems(self, hids, mems, qlen, mlen):
+    def _update_mems(self, hids, mems, mlen, qlen):
         # does not deal with None
         if mems is None:
             return None
@@ -705,7 +669,41 @@ class TransfoXLModel(TransfoXLPreTrainedModel):
 
         return new_mems
 
+    @add_start_docstrings_to_callable(TRANSFO_XL_INPUTS_DOCSTRING)
     def forward(self, input_ids=None, mems=None, head_mask=None, inputs_embeds=None):
+        r"""
+    Return:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.TransfoXLConfig`) and inputs:
+        last_hidden_state (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`):
+            Sequence of hidden-states at the last layer of the model.
+        mems (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
+            Contains pre-computed hidden-states (key and values in the attention blocks).
+            Can be used (see `mems` input) to speed up sequential decoding. The token ids which have their past given to this model
+            should not be passed as input ids as they have already been computed.
+        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+
+    Examples::
+
+        from transformers import TransfoXLTokenizer, TransfoXLModel
+        import torch
+
+        tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
+        model = TransfoXLModel.from_pretrained('transfo-xl-wt103')
+        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
+        outputs = model(input_ids)
+        last_hidden_states, mems = outputs[:2]
+
+        """
         # the original code for Transformer-XL used shapes [len, bsz] but we want a unified interface in the library
         # so we transpose here from shape [bsz, len] to shape [len, bsz]
         if input_ids is not None and inputs_embeds is not None:
@@ -805,85 +803,43 @@ class TransfoXLModel(TransfoXLPreTrainedModel):
     """The Transformer-XL Model with a language modeling head on top
     (adaptive softmax with weights tied to the adaptive input embeddings)""",
     TRANSFO_XL_START_DOCSTRING,
-    TRANSFO_XL_INPUTS_DOCSTRING,
 )
 class TransfoXLLMHeadModel(TransfoXLPreTrainedModel):
-    r"""
-        **labels**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size, sequence_length)``:
-            Labels for language modeling.
-            Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
-            Indices are selected in ``[-1, 0, ..., config.vocab_size]``
-            All labels set to ``-100`` are ignored (masked), the loss is only
-            computed for labels in ``[0, ..., config.vocab_size]``
-
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
-            Language modeling loss.
-        **prediction_scores**: ``None`` if ``labels`` is provided else ``torch.FloatTensor`` of shape ``(batch_size, sequence_length, config.vocab_size)``
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-            We don't output them when the loss is computed to speedup adaptive softmax decoding.
-        **mems**:
-            list of ``torch.FloatTensor`` (one for each layer):
-            that contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
-            (see `mems` input above). Can be used to speed up sequential decoding and attend to longer context.
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
-        model = TransfoXLLMHeadModel.from_pretrained('transfo-xl-wt103')
-        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
-        outputs = model(input_ids)
-        prediction_scores, mems = outputs[:2]
-
-    """
-
     def __init__(self, config):
-        super(TransfoXLLMHeadModel, self).__init__(config)
+        super().__init__(config)
         self.transformer = TransfoXLModel(config)
         self.sample_softmax = config.sample_softmax
-        # use sampled softmax
-        if config.sample_softmax > 0:
-            self.out_layer = nn.Linear(config.d_model, config.vocab_size)
-            self.sampler = LogUniformSampler(config.vocab_size, config.sample_softmax)
-        # use adaptive softmax (including standard softmax)
-        else:
-            self.crit = ProjectedAdaptiveLogSoftmax(
-                config.vocab_size, config.d_embed, config.d_model, config.cutoffs, div_val=config.div_val
-            )
+
+        assert (
+            self.sample_softmax <= 0
+        ), "Sampling from the softmax is not implemented yet. Please look at issue: #3310: https://github.com/huggingface/transformers/issues/3310"
+
+        self.crit = ProjectedAdaptiveLogSoftmax(
+            config.vocab_size, config.d_embed, config.d_model, config.cutoffs, div_val=config.div_val
+        )
+
         self.init_weights()
 
     def tie_weights(self):
         """
         Run this to be sure output and input (adaptive) softmax weights are tied
         """
-        # sampled softmax
-        if self.sample_softmax > 0:
-            if self.config.tie_weight:
-                self.out_layer.weight = self.transformer.word_emb.weight
-        # adaptive softmax (including standard softmax)
-        else:
-            if self.config.tie_weight:
-                for i in range(len(self.crit.out_layers)):
-                    self._tie_or_clone_weights(self.crit.out_layers[i], self.transformer.word_emb.emb_layers[i])
-            if self.config.tie_projs:
-                for i, tie_proj in enumerate(self.config.tie_projs):
-                    if tie_proj and self.config.div_val == 1 and self.config.d_model != self.config.d_embed:
-                        if self.config.torchscript:
-                            self.crit.out_projs[i] = nn.Parameter(self.transformer.word_emb.emb_projs[0].clone())
-                        else:
-                            self.crit.out_projs[i] = self.transformer.word_emb.emb_projs[0]
-                    elif tie_proj and self.config.div_val != 1:
-                        if self.config.torchscript:
-                            self.crit.out_projs[i] = nn.Parameter(self.transformer.word_emb.emb_projs[i].clone())
-                        else:
-                            self.crit.out_projs[i] = self.transformer.word_emb.emb_projs[i]
+
+        if self.config.tie_weight:
+            for i in range(len(self.crit.out_layers)):
+                self._tie_or_clone_weights(self.crit.out_layers[i], self.transformer.word_emb.emb_layers[i])
+        if self.config.tie_projs:
+            for i, tie_proj in enumerate(self.config.tie_projs):
+                if tie_proj and self.config.div_val == 1 and self.config.d_model != self.config.d_embed:
+                    if self.config.torchscript:
+                        self.crit.out_projs[i] = nn.Parameter(self.transformer.word_emb.emb_projs[0].clone())
+                    else:
+                        self.crit.out_projs[i] = self.transformer.word_emb.emb_projs[0]
+                elif tie_proj and self.config.div_val != 1:
+                    if self.config.torchscript:
+                        self.crit.out_projs[i] = nn.Parameter(self.transformer.word_emb.emb_projs[i].clone())
+                    else:
+                        self.crit.out_projs[i] = self.transformer.word_emb.emb_projs[i]
 
     def reset_length(self, tgt_len, ext_len, mem_len):
         self.transformer.reset_length(tgt_len, ext_len, mem_len)
@@ -891,7 +847,50 @@ class TransfoXLLMHeadModel(TransfoXLPreTrainedModel):
     def init_mems(self, bsz):
         return self.transformer.init_mems(bsz)
 
+    @add_start_docstrings_to_callable(TRANSFO_XL_INPUTS_DOCSTRING)
     def forward(self, input_ids=None, mems=None, head_mask=None, inputs_embeds=None, labels=None):
+        r"""
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
+            Labels for language modeling.
+            Note that the labels **are shifted** inside the model, i.e. you can set ``lm_labels = input_ids``
+            Indices are selected in ``[-100, 0, ..., config.vocab_size]``
+            All labels set to ``-100`` are ignored (masked), the loss is only
+            computed for labels in ``[0, ..., config.vocab_size]``
+
+    Return:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.TransfoXLConfig`) and inputs:
+        loss (:obj:`torch.FloatTensor` of shape `(batch_size, sequence_length-1)`, `optional`, returned when ``labels`` is provided)
+            Language modeling loss.
+        prediction_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
+            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
+        mems (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
+            Contains pre-computed hidden-states (key and values in the attention blocks).
+            Can be used (see `past` input) to speed up sequential decoding. The token ids which have their past given to this model
+            should not be passed as input ids as they have already been computed.
+        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+
+    Examples::
+
+        from transformers import TransfoXLTokenizer, TransfoXLLMHeadModel
+        import torch
+
+        tokenizer = TransfoXLTokenizer.from_pretrained('transfo-xl-wt103')
+        model = TransfoXLLMHeadModel.from_pretrained('transfo-xl-wt103')
+        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
+        outputs = model(input_ids)
+        prediction_scores, mems = outputs[:2]
+
+        """
         if input_ids is not None:
             bsz, tgt_len = input_ids.size(0), input_ids.size(1)
         elif inputs_embeds is not None:
@@ -904,22 +903,14 @@ class TransfoXLLMHeadModel(TransfoXLPreTrainedModel):
         last_hidden = transformer_outputs[0]
         pred_hid = last_hidden[:, -tgt_len:]
         outputs = transformer_outputs[1:]
-        if self.sample_softmax > 0 and self.training:
-            assert self.config.tie_weight
-            logit = sample_logits(self.transformer.word_emb, self.out_layer.bias, labels, pred_hid, self.sampler)
-            softmax_output = -F.log_softmax(logit, -1)[:, :, 0]
+
+        softmax_output = self.crit(pred_hid, labels)
+        if labels is None:
+            softmax_output = softmax_output.view(bsz, tgt_len, -1)
             outputs = [softmax_output] + outputs
-            if labels is not None:
-                # TODO: This is not implemented
-                raise NotImplementedError
         else:
-            softmax_output = self.crit(pred_hid.view(-1, pred_hid.size(-1)), labels)
-            if labels is None:
-                softmax_output = softmax_output.view(bsz, tgt_len, -1)
-                outputs = [softmax_output] + outputs
-            else:
-                softmax_output = softmax_output.view(bsz, tgt_len)
-                outputs = [softmax_output, None] + outputs
+            softmax_output = softmax_output.view(bsz, tgt_len - 1)
+            outputs = [softmax_output, None] + outputs
 
         return outputs  # (loss), logits or None if labels is not None (speed up adaptive softmax), new_mems, (all hidden states), (all attentions)
 
@@ -931,11 +922,11 @@ class TransfoXLLMHeadModel(TransfoXLPreTrainedModel):
         else:
             return self.crit.out_layers[-1]
 
-    def prepare_inputs_for_generation(self, input_ids, **model_kwargs):
+    def prepare_inputs_for_generation(self, input_ids, past, **model_kwargs):
         inputs = {"input_ids": input_ids}
 
         # if past is defined in model kwargs then use it for faster decoding
-        if "past" in model_kwargs and model_kwargs["past"]:
-            inputs["mems"] = model_kwargs["past"]
+        if past:
+            inputs["mems"] = past
 
         return inputs

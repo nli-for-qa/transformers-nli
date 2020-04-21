@@ -23,6 +23,8 @@ To create the package for pypi.
 
    twine upload dist/* -r pypitest
    (pypi suggest using twine as other methods upload files via plaintext.)
+   You may have to specify the repository url, use the following command then:
+   twine upload dist/* -r pypitest --repository-url=https://test.pypi.org/legacy/
 
    Check that you can install it in a virtualenv by running:
    pip install -i https://testpypi.python.org/pypi transformers
@@ -32,6 +34,9 @@ To create the package for pypi.
 
 7. Copy the release notes from RELEASE.md to the tag in github once everything is looking hunky-dory.
 
+8. Update the documentation commit in .circleci/deploy.sh for the accurate documentation to be displayed
+
+9. Update README.md to redirect to correct documentation.
 """
 
 import shutil
@@ -61,20 +66,25 @@ extras = {}
 extras["mecab"] = ["mecab-python3"]
 extras["sklearn"] = ["scikit-learn"]
 extras["tf"] = ["tensorflow"]
+extras["tf-cpu"] = ["tensorflow-cpu"]
 extras["torch"] = ["torch"]
 
-extras["serving"] = ["pydantic", "uvicorn", "fastapi"]
+extras["serving"] = ["pydantic", "uvicorn", "fastapi", "starlette"]
 extras["all"] = extras["serving"] + ["tensorflow", "torch"]
 
 extras["testing"] = ["pytest", "pytest-xdist"]
-extras["quality"] = ["black", "isort", "flake8"]
 extras["docs"] = ["recommonmark", "sphinx", "sphinx-markdown-tables", "sphinx-rtd-theme"]
+extras["quality"] = [
+    "black",
+    "isort @ git+git://github.com/timothycrosley/isort.git@e63ae06ec7d70b06df9e528357650281a3d3ec22#egg=isort",
+    "flake8",
+]
 extras["dev"] = extras["testing"] + extras["quality"] + ["mecab-python3", "scikit-learn", "tensorflow", "torch"]
 
 setup(
     name="transformers",
-    version="2.3.0",
-    author="Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Google AI Language Team Authors, Open AI team Authors, Facebook AI Authors, Carnegie Mellon University Authors",
+    version="2.8.0",
+    author="Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Sam Shleifer, Google AI Language Team Authors, Open AI team Authors, Facebook AI Authors, Carnegie Mellon University Authors",
     author_email="thomas@huggingface.co",
     description="State-of-the-art Natural Language Processing for TensorFlow 2.0 and PyTorch",
     long_description=open("README.md", "r", encoding="utf-8").read(),
@@ -86,7 +96,9 @@ setup(
     packages=find_packages("src"),
     install_requires=[
         "numpy",
-        "tokenizers == 0.0.11",
+        "tokenizers == 0.7.0rc7",
+        # dataclasses for Python versions that don't have it
+        "dataclasses;python_version<'3.7'",
         # accessing files from S3 directly
         "boto3",
         # filesystem locks e.g. to prevent parallel downloads
@@ -94,7 +106,7 @@ setup(
         # for downloading models over HTTPS
         "requests",
         # progress bars in model download and training scripts
-        "tqdm",
+        "tqdm >= 4.27",
         # for OpenAI GPT
         "regex != 2019.12.17",
         # for XLNet
@@ -104,7 +116,7 @@ setup(
     ],
     extras_require=extras,
     scripts=["transformers-cli"],
-    python_requires=">=3.5.0",
+    python_requires=">=3.6.0",
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
@@ -113,7 +125,6 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",

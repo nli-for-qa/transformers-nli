@@ -29,7 +29,7 @@ class XLMTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
     tokenizer_class = XLMTokenizer
 
     def setUp(self):
-        super(XLMTokenizationTest, self).setUp()
+        super().setUp()
 
         # Adapted from Sennrich et al. 2015 and https://github.com/rsennrich/subword-nmt
         vocab = [
@@ -96,5 +96,5 @@ class XLMTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         encoded_sentence = tokenizer.build_inputs_with_special_tokens(text)
         encoded_pair = tokenizer.build_inputs_with_special_tokens(text, text_2)
 
-        assert encoded_sentence == [1] + text + [1]
-        assert encoded_pair == [1] + text + [1] + text_2 + [1]
+        assert encoded_sentence == [0] + text + [1]
+        assert encoded_pair == [0] + text + [1] + text_2 + [1]
