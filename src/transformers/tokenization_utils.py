@@ -1656,7 +1656,6 @@ class PreTrainedTokenizer(SpecialTokensMixin):
         return_lengths: bool = False,
         **kwargs
     ) -> BatchEncoding:
->>>>>>> 7d40901ce3ad9e1c79fd9bb117f5b84bff42c33f
         """
         Returns a dictionary containing the encoded sequence or sequence pair and additional information:
         the mask for sequence classification and the overflowing elements if a ``max_length`` is specified.
