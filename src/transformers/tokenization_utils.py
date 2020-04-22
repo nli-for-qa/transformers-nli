@@ -1464,7 +1464,6 @@ class PreTrainedTokenizer(SpecialTokensMixin):
             truncation_strategy=truncation_strategy,
             pad_to_max_length=pad_to_max_length,
             return_tensors=return_tensors,
-            truncate_from_end=truncate_from_end,
             **kwargs,
         )
 
@@ -1628,7 +1627,6 @@ class PreTrainedTokenizer(SpecialTokensMixin):
             return_token_type_ids=return_token_type_ids,
             return_overflowing_tokens=return_overflowing_tokens,
             return_special_tokens_mask=return_special_tokens_mask,
-            truncate_from_end=truncate_from_end,
         )
 
     def batch_encode_plus(
@@ -1948,8 +1946,7 @@ class PreTrainedTokenizer(SpecialTokensMixin):
                 pair_ids=pair_ids,
                 num_tokens_to_remove=total_len - max_length,
                 truncation_strategy=truncation_strategy,
-                stride=stride,
-                truncate_from_end=truncate_from_end)
+                stride=stride,)
 
             if return_overflowing_tokens:
                 encoded_inputs["overflowing_tokens"] = overflowing_tokens
@@ -2107,9 +2104,6 @@ class PreTrainedTokenizer(SpecialTokensMixin):
         if num_tokens_to_remove <= 0:
             return ids, pair_ids, []
 
-        if truncate_from_end:
-            ids.reverse()
-
             if pair_ids is not None:
                 pair_ids.reverse()
 
@@ -2145,9 +2139,6 @@ class PreTrainedTokenizer(SpecialTokensMixin):
             raise ValueError(
                 "Truncation_strategy should be selected in ['longest_first', 'only_first', 'only_second', 'do_not_truncate']"
             )
-
-        if truncate_from_end:
-            ids.reverse()
 
             if pair_ids is not None:
                 pair_ids.reverse()
