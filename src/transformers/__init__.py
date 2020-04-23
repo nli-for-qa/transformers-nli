@@ -243,6 +243,8 @@ if is_torch_available():
         RobertaForTokenClassification,
         RobertaForSequenceClassificationTwoClassWithSigmoid,
         RobertaForQuestionAnswering,
+        RobertaForTransferableMCQ,
+        RobertaForTransferableEntailment,
         ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
     from .modeling_distilbert import (
