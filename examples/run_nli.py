@@ -210,15 +210,15 @@ def train(args, train_dataset, model, tokenizer):
         num_training_steps=t_total)
 
     # Check if saved optimizer or scheduler states exist
-
-    if os.path.isfile(os.path.join(
-            args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
-                os.path.join(args.model_name_or_path, "scheduler.pt")):
-        # Load in optimizer and scheduler states
-        optimizer.load_state_dict(
-            torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
-        scheduler.load_state_dict(
-            torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
+    logger.info("Not checking for optimizer state.. Starting fresh")
+    #if os.path.isfile(os.path.join(
+    #        args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
+    #            os.path.join(args.model_name_or_path, "scheduler.pt")):
+    #    # Load in optimizer and scheduler states
+    #    optimizer.load_state_dict(
+    #        torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
+    #    scheduler.load_state_dict(
+    #        torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
 
     if args.fp16:
         try:
@@ -265,21 +265,21 @@ def train(args, train_dataset, model, tokenizer):
     steps_trained_in_current_epoch = 0
     # Check if continuing training from a checkpoint
 
-    if os.path.exists(args.model_name_or_path):
-        # set global_step to gobal_step of last saved checkpoint from model path
-        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
-        epochs_trained = global_step // (
-            len(train_dataloader) // args.gradient_accumulation_steps)
-        steps_trained_in_current_epoch = global_step % (
-            len(train_dataloader) // args.gradient_accumulation_steps)
-
-        logger.info(
-            "  Continuing training from checkpoint, will skip to saved global_step"
-        )
-        logger.info("  Continuing training from epoch %d", epochs_trained)
-        logger.info("  Continuing training from global step %d", global_step)
-        logger.info("  Will skip the first %d steps in the first epoch",
-                    steps_trained_in_current_epoch)
+    #if os.path.exists(args.model_name_or_path):
+        ## set global_step to gobal_step of last saved checkpoint from model path
+        #global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
+        #epochs_trained = global_step // (
+            #len(train_dataloader) // args.gradient_accumulation_steps)
+        #steps_trained_in_current_epoch = global_step % (
+            #len(train_dataloader) // args.gradient_accumulation_steps)
+#
+        #logger.info(
+            #"  Continuing training from checkpoint, will skip to saved global_step"
+        #)
+        #logger.info("  Continuing training from epoch %d", epochs_trained)
+        #logger.info("  Continuing training from global step %d", global_step)
+        #logger.info("  Will skip the first %d steps in the first epoch",
+                    #steps_trained_in_current_epoch)
 
     tr_loss, logging_loss = 0.0, 0.0
     model.zero_grad()
