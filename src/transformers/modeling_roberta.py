@@ -770,13 +770,11 @@ class RobertaForTransferableEntailment(RobertaEntailmentScorer):
         pooled_output = outputs[1]
 
         score = torch.nn.functional.sigmoid(self.scorer(pooled_output))
-        neg_score = 1.0 - score
-        logits = torch.stack((neg_score, score), dim=-1)
-        outputs = (logits, ) + outputs[2:]
+        outputs = (score, ) + outputs[2:]
 
         if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(logits, labels)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                score, labels)
             outputs = (loss, ) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
