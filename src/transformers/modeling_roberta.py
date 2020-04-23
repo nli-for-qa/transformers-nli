@@ -769,8 +769,7 @@ class RobertaForTransferableEntailment(RobertaEntailmentScorer):
         )
         pooled_output = outputs[1]
 
-        score = torch.nn.functional.sigmoid(
-            self.scorer(pooled_output)).view(-1)
+        score = (self.scorer(pooled_output)).view(-1)
         outputs = (score, ) + outputs[2:]
 
         if labels is not None:
