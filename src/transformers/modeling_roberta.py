@@ -773,6 +773,7 @@ class RobertaForTransferableEntailment(RobertaEntailmentScorer):
         outputs = (score, ) + outputs[2:]
 
         if labels is not None:
+            labels = labels.to(dtype=torch.float32)
             loss = torch.nn.functional.binary_cross_entropy_with_logits(
                 score, labels)
             outputs = (loss, ) + outputs
