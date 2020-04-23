@@ -775,14 +775,7 @@ class RobertaForTransferableEntailment(RobertaEntailmentScorer):
         outputs = (logits, ) + outputs[2:]
 
         if labels is not None:
-            if self.class_weights:
-                loss_fct = CrossEntropyLoss(
-                    weight=torch.tensor(
-                        self.class_weights,
-                        device=outputs[0].device,
-                        dtype=outputs[0].dtype))
-            else:
-                loss_fct = CrossEntropyLoss()
+            loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits, labels)
             outputs = (loss, ) + outputs
 
