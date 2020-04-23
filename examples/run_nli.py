@@ -46,6 +46,8 @@ from transformers import (
     RobertaForSequenceClassificationTwoClassWithSigmoid,
     RobertaForMultipleChoice,
     RobertaTokenizer,
+    RobertaForTransferableMCQ,
+    RobertaForTransferableEntailment,
     XLMConfig,
     XLMForSequenceClassification,
     XLMRobertaConfig,
@@ -118,17 +120,19 @@ MODEL_CLASSES = {
     "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     "roberta-nli": (RobertaConfig, RobertaForSequenceClassification,
                     RobertaTokenizer),
-    "roberta-nli-sigmoid":
-    (RobertaConfig, RobertaForSequenceClassificationTwoClassWithSigmoid,
-     RobertaTokenizer),
-    "roberta-nli-rev-sigmoid":
-    (RobertaConfig, RobertaForSequenceClassificationTwoClassWithSigmoid,
-     RobertaTokenizerRev),
-    "roberta-qa": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
     "roberta-nli-rev": (RobertaConfig, RobertaForSequenceClassification,
                         RobertaTokenizerRev),
+    "roberta-nli-transferable":
+    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizer),
+    "roberta-nli-transferable-rev":
+    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizerRev),
+    "roberta-qa": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
     "roberta-qa-rev": (RobertaConfig, RobertaForMultipleChoice,
                        RobertaTokenizerRev),
+    "roberta-qa-transferable": (RobertaConfig, RobertaForTransferableMCQ,
+                                RobertaTokenizer),
+    "roberta-qa-transferable-rev": (RobertaConfig, RobertaForTransferableMCQ,
+                                    RobertaTokenizerRev),
     "distilbert": (DistilBertConfig, DistilBertForSequenceClassification,
                    DistilBertTokenizer),
     "albert": (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
@@ -210,16 +214,24 @@ def train(args, train_dataset, model, tokenizer):
         num_training_steps=t_total)
 
     # Check if saved optimizer or scheduler states exist
-    logger.info("Not checking for optimizer state.. Starting fresh")
 
-    if os.path.isfile(os.path.join(
-            args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
-                os.path.join(args.model_name_or_path, "scheduler.pt")):
-        # Load in optimizer and scheduler states
-        optimizer.load_state_dict(
-            torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
-        scheduler.load_state_dict(
-            torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
+    if args.resume:
+        opt_path = os.path.join(args.model_name_or_path, "optimizer.pt")
+        sch_path = os.path.join(args.model_name_or_path, "scheduler.pt")
+
+        if os.path.isfile(opt_path) and os.path.isfile(sch_path):
+            # Load in optimizer and scheduler states
+            optimizer.load_state_dict(torch.load(opt_path))
+            scheduler.load_state_dict(torch.load(sch_path))
+        else:
+            raise RuntimeError(
+                f"--resume was set but there are no optimizer and scheduler states at {opt_path} and {sch_path}"
+            )
+
+    else:
+        logger.info(
+            "Not checking for optimizer and scheduler state as --resume was not set. Starting afresh"
+        )
 
     if args.fp16:
         try:
@@ -266,9 +278,11 @@ def train(args, train_dataset, model, tokenizer):
     steps_trained_in_current_epoch = 0
     # Check if continuing training from a checkpoint
 
-    if os.path.exists(args.model_name_or_path):
-        # set global_step to gobal_step of last saved checkpoint from model path
-        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
+    if args.resume:
+        if not args.global_step:
+            raise ValueError(
+                "--global_step (int) has to be set when using --resume")
+        global_step = args.global_step
         epochs_trained = global_step // (
             len(train_dataloader) // args.gradient_accumulation_steps)
         steps_trained_in_current_epoch = global_step % (
@@ -426,10 +440,8 @@ def train(args, train_dataset, model, tokenizer):
 
 def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
-    eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (
-        args.task_name, )
-    eval_outputs_dirs = (args.output_dir, args.output_dir + "-MM"
-                         ) if args.task_name == "mnli" else (args.output_dir, )
+    eval_task_names = (args.task_name, )
+    eval_outputs_dirs = (args.output_dir, )
 
     results = {}
 
@@ -559,10 +571,6 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         logger.info("Creating features from dataset file at %s", args.data_dir)
         label_list = processor.get_labels()
 
-        if task in ["mnli", "mnli-mm"
-                    ] and args.model_type in ["roberta", "xlmroberta"]:
-            # HACK(label indices are swapped in RoBERTa pretrained model)
-            label_list[1], label_list[2] = label_list[2], label_list[1]
         examples = (processor.get_dev_examples(args.data_dir) if evaluate else
                     processor.get_train_examples(args.data_dir))
         features = convert_examples_to_features[task](
@@ -808,6 +816,16 @@ def main():
         help="Overwrite the cached training and evaluation sets",
     )
     parser.add_argument(
+        '--resume',
+        action='store_true',
+        help="set this if you want to resume training "
+        "using saved scheduler and optimizer states")
+    parser.add_argument(
+        '--global_step',
+        type=int,
+        help="Global step number to resume from. "
+        "Has to be passed when using --resume")
+    parser.add_argument(
         "--seed", type=int, default=42, help="random seed for initialization")
 
     parser.add_argument(
@@ -931,12 +949,18 @@ def main():
         do_lower_case=args.do_lower_case,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
-    model = model_class.from_pretrained(
+    model, loading_info = model_class.from_pretrained(
         args.model_name_or_path,
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
+        output_loading_info=True,
     )
+
+    for k, v in loading_info.items():
+        if v:
+            logger.warn(f"Issue with loading...")
+            logger.warn(f"{k}: {v}")
 
     # set class weights on the model
 

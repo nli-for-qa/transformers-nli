@@ -725,8 +725,8 @@ class RobertaForTransferableMCQ(RobertaEntailmentScorer):
         )
         pooled_output = outputs[1]
 
-        logits = self.scorer(pooled_output)
-        reshaped_logits = logits.view(-1, num_choices)
+        logits = self.scorer(pooled_output)  # (batch,1)
+        reshaped_logits = logits.view(-1, num_choices)  # (batch, num_choices)
 
         outputs = (reshaped_logits, ) + outputs[
             2:]  # add hidden states and attention if they are here

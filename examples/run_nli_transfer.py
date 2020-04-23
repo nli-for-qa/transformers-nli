@@ -210,15 +210,24 @@ def train(args, train_dataset, model, tokenizer):
         num_training_steps=t_total)
 
     # Check if saved optimizer or scheduler states exist
-    logger.info("Not checking for optimizer state.. Starting fresh")
-    # if os.path.isfile(os.path.join(
-    #        args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
-    #            os.path.join(args.model_name_or_path, "scheduler.pt")):
-    #    # Load in optimizer and scheduler states
-    #    optimizer.load_state_dict(
-    #        torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
-    #    scheduler.load_state_dict(
-    #        torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
+
+    if args.resume:
+        opt_path = os.path.join(args.model_name_or_path, "optimizer.pt")
+        sch_path = os.path.join(args.model_name_or_path, "scheduler.pt")
+
+        if os.path.isfile(opt_path) and os.path.isfile(sch_path):
+            # Load in optimizer and scheduler states
+            optimizer.load_state_dict(torch.load(opt_path))
+            scheduler.load_state_dict(torch.load(sch_path))
+        else:
+            raise RuntimeError(
+                f"--resume was set but there are no optimizer and scheduler states at {opt_path} and {sch_path}"
+            )
+
+    else:
+        logger.info(
+            "Not checking for optimizer and scheduler state as --resume was not set. Starting afresh"
+        )
 
     if args.fp16:
         try:
@@ -265,21 +274,23 @@ def train(args, train_dataset, model, tokenizer):
     steps_trained_in_current_epoch = 0
     # Check if continuing training from a checkpoint
 
-    # if os.path.exists(args.model_name_or_path):
-    # set global_step to gobal_step of last saved checkpoint from model path
-    #global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
-    # epochs_trained = global_step // (
-    # len(train_dataloader) // args.gradient_accumulation_steps)
-    # steps_trained_in_current_epoch = global_step % (
-    # len(train_dataloader) // args.gradient_accumulation_steps)
-    #
-    # logger.info(
-    #"  Continuing training from checkpoint, will skip to saved global_step"
-    # )
-    #logger.info("  Continuing training from epoch %d", epochs_trained)
-    #logger.info("  Continuing training from global step %d", global_step)
-    # logger.info("  Will skip the first %d steps in the first epoch",
-    # steps_trained_in_current_epoch)
+    if args.resume:
+        if not args.global_step:
+            raise ValueError(
+                "--global_step (int) has to be set when using --resume")
+        global_step = args.global_step
+        epochs_trained = global_step // (
+            len(train_dataloader) // args.gradient_accumulation_steps)
+        steps_trained_in_current_epoch = global_step % (
+            len(train_dataloader) // args.gradient_accumulation_steps)
+        #
+        logger.info(
+            "  Continuing training from checkpoint, will skip to saved global_step"
+        )
+        logger.info("  Continuing training from epoch %d", epochs_trained)
+        logger.info("  Continuing training from global step %d", global_step)
+        logger.info("  Will skip the first %d steps in the first epoch",
+                    steps_trained_in_current_epoch)
 
     tr_loss, logging_loss = 0.0, 0.0
     model.zero_grad()
@@ -558,10 +569,6 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         logger.info("Creating features from dataset file at %s", args.data_dir)
         label_list = processor.get_labels()
 
-        if task in ["mnli", "mnli-mm"
-                    ] and args.model_type in ["roberta", "xlmroberta"]:
-            # HACK(label indices are swapped in RoBERTa pretrained model)
-            label_list[1], label_list[2] = label_list[2], label_list[1]
         examples = (processor.get_dev_examples(args.data_dir) if evaluate else
                     processor.get_train_examples(args.data_dir))
         features = convert_examples_to_features[task](
@@ -806,6 +813,16 @@ def main():
         action="store_true",
         help="Overwrite the cached training and evaluation sets",
     )
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help="set this if you want to resume training "
+        "using saved scheduler and optimizer states")
+    parser.add_argument(
+        '--global_step',
+        type=int,
+        help="Global step number to resume from. "
+        "Has to be passed when using --resume")
     parser.add_argument(
         "--seed", type=int, default=42, help="random seed for initialization")
 
