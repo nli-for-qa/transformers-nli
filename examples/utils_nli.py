@@ -522,23 +522,30 @@ class QA2NLIProcessor(DataProcessor):
 
         return examples
 
+class QA2NLIProcessor3class(QA2NLIProcessor):
+    def get_labels(self):
+        return [0, 1, 2]
 
 nli_tasks_num_labels = {
-    "nli": 2,
-    "race2nli": 4,
+    "nli": 2, 
+    "race2nli": 4, 
+    "dream2nli": 3
 }
 
 nli_processors = {
     "nli": NLIProcessor,
     "race2nli": QA2NLIProcessor,
+    "dream2nli": QA2NLIProcessor3class
 }
 
 nli_output_modes = {
     "nli": "classification",
     "race2nli": "classification",
+    "dream2nli": "classification"
 }
 
 convert_examples_to_features = {
     "nli": nli_convert_examples_to_features,
     "race2nli": qa2nli_convert_examples_to_features,
+    "dream2nli": qa2nli_convert_examples_to_features
 }

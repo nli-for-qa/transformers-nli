@@ -164,7 +164,7 @@ def train(args, train_dataset, model, tokenizer):
                 str(args.warmup_steps)]),
             str(args.seed)
             )
-        print ("Tensorboard dir: ", tensorboard_log_dir)
+        logger.info("Tensorboard dir: %s", tensorboard_log_dir)
         tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
@@ -609,7 +609,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         elif output_mode == "regression":
             all_labels = torch.tensor([f.label for f in features],
                                       dtype=torch.float)
-    elif task in ['race2nli']:
+    elif task in ['race2nli', 'dream2nli']:
 
         all_input_ids = torch.tensor(
             select_field(features, "input_ids"), dtype=torch.long)
