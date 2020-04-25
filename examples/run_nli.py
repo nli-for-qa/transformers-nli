@@ -914,6 +914,7 @@ def main():
         bool(args.local_rank != -1),
         args.fp16,
     )
+    logger.info(f"Using  {args.n_gpu} gpus")
 
     # Set seed
     set_seed(args)
