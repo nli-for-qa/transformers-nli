@@ -463,7 +463,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
         # multi-gpu eval
 
-        if args.n_gpu > 1:
+        if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
             model = torch.nn.DataParallel(model)
 
         # Eval!
