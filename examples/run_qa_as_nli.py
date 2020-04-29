@@ -124,7 +124,6 @@ def train(args, train_dataset, model, tokenizer):
         tensorboard_log_dir = os.path.join("tensorboard", 
             args.task_name, 
             args.hypothesis_type,
-            args.data_dir,
             "_".join([args.model_name_or_path,
                 str(args.max_seq_length), 
                 str(max(1,args.n_gpu)* args.gradient_accumulation_steps * args.per_gpu_train_batch_size),
