@@ -403,7 +403,7 @@ def train(args, train_dataset, model, tokenizer):
 def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_name = args.task_name
-    eval_outputs_dir = args.output_dir
+    eval_output_dir = args.output_dir
 
     results = {}
 
