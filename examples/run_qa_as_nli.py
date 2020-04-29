@@ -122,7 +122,7 @@ def train(args, train_dataset, model, tokenizer):
 
     if args.local_rank in [-1, 0]:
         tensorboard_log_dir = os.path.join("tensorboard", 
-            args.task_name, 
+            args.data_dir.split('/')[5],
             args.hypothesis_type,
             ("subset" if args.subset else "full"),
             "_".join([args.model_name_or_path,
@@ -408,7 +408,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     results = {}
 
     eval_dataset = load_and_cache_examples(
-        args, eval_task, tokenizer, evaluate=True)
+        args, eval_task_name, tokenizer, evaluate=True)
 
     if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(eval_output_dir)
