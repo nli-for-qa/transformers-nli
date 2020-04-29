@@ -122,7 +122,7 @@ def train(args, train_dataset, model, tokenizer):
 
     if args.local_rank in [-1, 0]:
         tensorboard_log_dir = os.path.join("tensorboard", 
-            args.data_dir.split('/')[5],
+            args.data_dir.split('/')[6],
             args.hypothesis_type,
             ("subset" if args.subset else "full"),
             "_".join([args.model_name_or_path,
