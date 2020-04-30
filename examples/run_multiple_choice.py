@@ -113,7 +113,19 @@ def train(args, train_dataset, model, tokenizer):
     """ Train the model """
 
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        tensorboard_log_dir = os.path.join(
+            "tensorboard", args.task_name, args.data_dir, "_".join([
+                args.model_name_or_path,
+                str(args.max_seq_length),
+                str(
+                    max(1, args.n_gpu) * args.gradient_accumulation_steps
+                    * args.per_gpu_train_batch_size),
+                str(args.learning_rate),
+                str(args.weight_decay),
+                str(args.warmup_steps)
+            ]), str(args.seed))
+        logger.info("Tensorboard dir: %s", tensorboard_log_dir)
+        tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(
@@ -298,7 +310,8 @@ def train(args, train_dataset, model, tokenizer):
                     tb_writer.add_scalar("lr",
                                          scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar(
-                        "loss", (tr_loss - logging_loss) / args.logging_steps,
+                        "train_loss",
+                        (tr_loss - logging_loss) / args.logging_steps,
                         global_step)
                     logger.info(
                         "Average loss: %s at global step: %s",

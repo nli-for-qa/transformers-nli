@@ -32,37 +32,16 @@ from tqdm import tqdm, trange
 from transformers import (
     WEIGHTS_NAME,
     AdamW,
-    AlbertConfig,
-    AlbertForSequenceClassification,
-    AlbertTokenizer,
-    BertConfig,
-    BertForSequenceClassification,
-    BertTokenizer,
-    DistilBertConfig,
-    DistilBertForSequenceClassification,
-    DistilBertTokenizer,
     RobertaConfig,
     RobertaForSequenceClassification,
-    RobertaForSequenceClassificationTwoClassWithSigmoid,
     RobertaForMultipleChoice,
     RobertaTokenizer,
-    RobertaForTransferableMCQ,
-    RobertaForTransferableEntailment,
-    XLMConfig,
-    XLMForSequenceClassification,
-    XLMRobertaConfig,
-    XLMRobertaForSequenceClassification,
-    XLMRobertaTokenizer,
-    XLMTokenizer,
-    XLNetConfig,
-    XLNetForSequenceClassification,
-    XLNetTokenizer,
     get_linear_schedule_with_warmup,
 )
 
-from utils_nli import convert_examples_to_features
-from utils_nli import nli_output_modes as output_modes
-from utils_nli import nli_processors as processors
+from utils_qa_as_nli import convert_examples_to_features
+from utils_qa_as_nli import output_modes as output_modes
+from utils_qa_as_nli import processors as processors
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -75,13 +54,7 @@ logger = logging.getLogger(__name__)
 
 ALL_MODELS = sum(
     (tuple(conf.pretrained_config_archive_map.keys()) for conf in (
-        BertConfig,
-        XLNetConfig,
-        XLMConfig,
         RobertaConfig,
-        DistilBertConfig,
-        AlbertConfig,
-        XLMRobertaConfig,
     )),
     (),
 )
@@ -115,29 +88,14 @@ class RobertaTokenizerRev(RobertaTokenizer):
 
 
 MODEL_CLASSES = {
-    "bert": (BertConfig, BertForSequenceClassification, BertTokenizer),
-    "xlnet": (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
-    "xlm": (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
-    "roberta-nli": (RobertaConfig, RobertaForSequenceClassification,
+    "roberta": (RobertaConfig, RobertaForSequenceClassification,
                     RobertaTokenizer),
-    "roberta-nli-rev": (RobertaConfig, RobertaForSequenceClassification,
-                        RobertaTokenizerRev),
-    "roberta-nli-transferable":
-    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizer),
-    "roberta-nli-transferable-rev":
-    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizerRev),
-    "roberta-qa": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
-    "roberta-qa-rev": (RobertaConfig, RobertaForMultipleChoice,
-                       RobertaTokenizerRev),
-    "roberta-qa-transferable": (RobertaConfig, RobertaForTransferableMCQ,
-                                RobertaTokenizer),
-    "roberta-qa-transferable-rev": (RobertaConfig, RobertaForTransferableMCQ,
-                                    RobertaTokenizerRev),
-    "distilbert": (DistilBertConfig, DistilBertForSequenceClassification,
-                   DistilBertTokenizer),
-    "albert": (AlbertConfig, AlbertForSequenceClassification, AlbertTokenizer),
-    "xlmroberta": (XLMRobertaConfig, XLMRobertaForSequenceClassification,
-                   XLMRobertaTokenizer),
+    "roberta-mc": (RobertaConfig, RobertaForMultipleChoice,
+                   RobertaTokenizer),
+    "roberta-rev": (RobertaConfig, RobertaForSequenceClassification,
+                    RobertaTokenizerRev),
+    "roberta-mc-rev": (RobertaConfig, RobertaForMultipleChoice,
+                   RobertaTokenizerRev),
 }
 
 
@@ -163,17 +121,18 @@ def train(args, train_dataset, model, tokenizer):
     """ Train the model """
 
     if args.local_rank in [-1, 0]:
-        tensorboard_log_dir = os.path.join(
-            "tensorboard", args.task_name, args.data_dir, "_".join([
-                args.model_name_or_path,
-                str(args.max_seq_length),
-                str(
-                    max(1, args.n_gpu) * args.gradient_accumulation_steps
-                    * args.per_gpu_train_batch_size),
+        tensorboard_log_dir = os.path.join("tensorboard", 
+            args.data_dir.split('/')[6],
+            args.hypothesis_type,
+            ("subset" if args.subset else "full"),
+            "_".join([args.model_name_or_path,
+                str(args.max_seq_length), 
+                str(max(1,args.n_gpu)* args.gradient_accumulation_steps * args.per_gpu_train_batch_size),
                 str(args.learning_rate),
                 str(args.weight_decay),
-                str(args.warmup_steps)
-            ]), str(args.seed))
+                str(args.warmup_steps)]),
+            str(args.seed)
+            )
         logger.info("Tensorboard dir: %s", tensorboard_log_dir)
         tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
@@ -227,23 +186,14 @@ def train(args, train_dataset, model, tokenizer):
 
     # Check if saved optimizer or scheduler states exist
 
-    if args.resume:
-        opt_path = os.path.join(args.model_name_or_path, "optimizer.pt")
-        sch_path = os.path.join(args.model_name_or_path, "scheduler.pt")
-
-        if os.path.isfile(opt_path) and os.path.isfile(sch_path):
-            # Load in optimizer and scheduler states
-            optimizer.load_state_dict(torch.load(opt_path))
-            scheduler.load_state_dict(torch.load(sch_path))
-        else:
-            raise RuntimeError(
-                f"--resume was set but there are no optimizer and scheduler states at {opt_path} and {sch_path}"
-            )
-
-    else:
-        logger.info(
-            "Not checking for optimizer and scheduler state as --resume was not set. Starting afresh"
-        )
+    if os.path.isfile(os.path.join(
+            args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
+                os.path.join(args.model_name_or_path, "scheduler.pt")):
+        # Load in optimizer and scheduler states
+        optimizer.load_state_dict(
+            torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
+        scheduler.load_state_dict(
+            torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
 
     if args.fp16:
         try:
@@ -290,16 +240,14 @@ def train(args, train_dataset, model, tokenizer):
     steps_trained_in_current_epoch = 0
     # Check if continuing training from a checkpoint
 
-    if args.resume:
-        if not args.global_step:
-            raise ValueError(
-                "--global_step (int) has to be set when using --resume")
-        global_step = args.global_step
+    if os.path.exists(args.model_name_or_path):
+        # set global_step to gobal_step of last saved checkpoint from model path
+        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
         epochs_trained = global_step // (
             len(train_dataloader) // args.gradient_accumulation_steps)
         steps_trained_in_current_epoch = global_step % (
             len(train_dataloader) // args.gradient_accumulation_steps)
-        #
+
         logger.info(
             "  Continuing training from checkpoint, will skip to saved global_step"
         )
@@ -403,11 +351,10 @@ def train(args, train_dataset, model, tokenizer):
                         "Performance at global step: %s",
                         str(global_step),
                     )
-
                     for key, value in logs.items():
                         logger.info("  %s = %s", key, str(value))
                         tb_writer.add_scalar(key, value, global_step)
-
+                    # print(json.dumps({**logs, **{"step": global_step}}))
                     if args.wandb:
                         wandb_log({**logs, **{"step": global_step}})
 
@@ -455,107 +402,104 @@ def train(args, train_dataset, model, tokenizer):
 
 def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
-    eval_task_names = (args.task_name, )
-    eval_outputs_dirs = (args.output_dir, )
+    eval_task_name = args.task_name
+    eval_output_dir = args.output_dir
 
     results = {}
 
-    for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_examples(
-            args, eval_task, tokenizer, evaluate=True)
+    eval_dataset = load_and_cache_examples(
+        args, eval_task_name, tokenizer, evaluate=True)
 
-        if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
-            os.makedirs(eval_output_dir)
+    if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
+        os.makedirs(eval_output_dir)
 
-        args.eval_batch_size = args.per_gpu_eval_batch_size * max(
-            1, args.n_gpu)
-        # Note that DistributedSampler samples randomly
-        eval_sampler = SequentialSampler(eval_dataset)
-        eval_dataloader = DataLoader(
-            eval_dataset,
-            sampler=eval_sampler,
-            batch_size=args.eval_batch_size)
+    args.eval_batch_size = args.per_gpu_eval_batch_size * max(
+        1, args.n_gpu)
+    # Note that DistributedSampler samples randomly
+    eval_sampler = SequentialSampler(eval_dataset)
+    eval_dataloader = DataLoader(
+        eval_dataset,
+        sampler=eval_sampler,
+        batch_size=args.eval_batch_size)
 
-        # multi-gpu eval
+    # multi-gpu eval
 
-        if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
-            model = torch.nn.DataParallel(model)
+    if args.n_gpu > 1:
+        model = torch.nn.DataParallel(model)
 
-        # Eval!
-        logger.info("***** Running evaluation {} *****".format(prefix))
-        logger.info("  Num examples = %d", len(eval_dataset))
-        logger.info("  Batch size = %d", args.eval_batch_size)
-        eval_loss = 0.0
-        nb_eval_steps = 0
-        scores = None
-        out_label_ids = None
+    # Eval!
+    logger.info("***** Running evaluation {} *****".format(prefix))
+    logger.info("  Num examples = %d", len(eval_dataset))
+    logger.info("  Batch size = %d", args.eval_batch_size)
+    eval_loss = 0.0
+    nb_eval_steps = 0
+    scores = None
+    out_label_ids = None
 
-        for batch in eval_dataloader:
-            model.eval()
-            batch = tuple(t.to(args.device) for t in batch)
+    for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
+        model.eval()
+        batch = tuple(t.to(args.device) for t in batch)
 
-            with torch.no_grad():
-                inputs = {
-                    "input_ids": batch[0],
-                    "attention_mask": batch[1],
-                    "labels": batch[3]
-                }
+        with torch.no_grad():
+            inputs = {
+                "input_ids": batch[0],
+                "attention_mask": batch[1],
+                "labels": batch[3]
+            }
 
-                if args.model_type != "distilbert":
-                    inputs["token_type_ids"] = (
-                        batch[2] if args.model_type in [
-                            "bert", "xlnet", "albert"
-                        ] else None
-                    )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
-                outputs = model(**inputs)
-                tmp_eval_loss, logits = outputs[:2]
+            if args.model_type != "distilbert":
+                inputs["token_type_ids"] = (
+                    batch[2] if args.model_type in [
+                        "bert", "xlnet", "albert"
+                    ] else None
+                )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
+            outputs = model(**inputs)
+            tmp_eval_loss, logits = outputs[:2]
 
-                eval_loss += tmp_eval_loss.mean().item()
-            nb_eval_steps += 1
+            eval_loss += tmp_eval_loss.mean().item()
+        nb_eval_steps += 1
 
-            if scores is None:
-                scores = logits.detach().cpu().numpy()
-                out_label_ids = inputs["labels"].detach().cpu().numpy()
-            else:
-                scores = np.append(
-                    scores, logits.detach().cpu().numpy(), axis=0)
-                out_label_ids = np.append(
-                    out_label_ids,
-                    inputs["labels"].detach().cpu().numpy(),
-                    axis=0)
+        if scores is None:
+            scores = logits.detach().cpu().numpy()
+            out_label_ids = inputs["labels"].detach().cpu().numpy()
+        else:
+            scores = np.append(scores, logits.detach().cpu().numpy(), axis=0)
+            out_label_ids = np.append(
+                out_label_ids,
+                inputs["labels"].detach().cpu().numpy(),
+                axis=0)
 
-        eval_loss = eval_loss / nb_eval_steps
+    eval_loss = eval_loss / nb_eval_steps
 
-        if args.output_mode == "classification":
-            preds = np.argmax(scores, axis=1)
-        elif args.output_mode == "regression":
-            preds = np.squeeze(scores)
-        # result = compute_metrics(eval_task, preds, out_label_ids)
-        acc = simple_accuracy(preds, out_label_ids)
+    if args.output_mode == "classification":
+        preds = np.argmax(scores, axis=1)
+    elif args.output_mode == "regression":
+        preds = np.squeeze(scores)
+    # result = compute_metrics(eval_task, preds, out_label_ids)
+    acc = simple_accuracy(preds, out_label_ids)
 
-        if args.save_preds:
-            pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
-            with open(pred_file, "w") as f:
-                writer = csv.writer(f)
-                writer.writerow(preds)
-            score_file = os.path.join(eval_output_dir, prefix,
-                                      "eval_scores.txt")
-            with open(score_file, "w") as f:
-                writer = csv.writer(f)
-                writer.writerow(scores)
+    if args.save_preds:
+        pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
+        with open(pred_file, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(preds)
+        score_file = os.path.join(eval_output_dir, prefix, "eval_scores.txt")
+        with open(score_file, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(scores)
+    
+    result = {"eval_acc": acc, "eval_loss": eval_loss}
 
-        result = {"eval_acc": acc, "eval_loss": eval_loss}
+    results.update(result)
 
-        results.update(result)
+    output_eval_file = os.path.join(eval_output_dir, prefix,
+                                    "eval_results.txt")
+    with open(output_eval_file, "w") as writer:
+        logger.info("***** Eval results {} *****".format(prefix))
 
-        output_eval_file = os.path.join(eval_output_dir, prefix,
-                                        "eval_results.txt")
-        with open(output_eval_file, "w") as writer:
-            logger.info("***** Eval results {} *****".format(prefix))
-
-            for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(result[key]))
-                writer.write("%s = %s\n" % (key, str(result[key])))
+        for key in sorted(result.keys()):
+            logger.info("  %s = %s", key, str(result[key]))
+            writer.write("%s = %s\n" % (key, str(result[key])))
 
     return results
 
@@ -570,13 +514,23 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
     # Load data features from cache or dataset file
     cached_features_file = os.path.join(
         args.data_dir,
-        "cached_{}_{}_{}_{}".format(
+        "cached_{}_{}_{}_{}_{}".format(
+            args.hypothesis_type,
             "dev" if evaluate else "train",
             list(filter(None, args.model_name_or_path.split("/"))).pop(),
             str(args.max_seq_length),
             str(task),
         ),
-    )
+    ) if not args.subset else os.path.join(
+            args.data_dir,
+            "cached_subset_{}_{}_{}_{}_{}".format(
+                args.hypothesis_type,
+                "dev" if evaluate else "train",
+                list(filter(None, args.model_name_or_path.split("/"))).pop(),
+                str(args.max_seq_length),
+                str(task),
+            ),
+        )
 
     if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s",
@@ -584,13 +538,14 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         features = torch.load(cached_features_file)
     else:
         logger.info("Creating features from dataset file at %s", args.data_dir)
-        label_list = processor.get_labels()
+        label_list = processor.get_labels(args.num_choices)
 
-        examples = (processor.get_dev_examples(args.data_dir) if evaluate else
-                    processor.get_train_examples(args.data_dir))
+        examples = (processor.get_dev_examples(args.data_dir, args.hypothesis_type, args.subset) if evaluate else
+                    processor.get_train_examples(args.data_dir, args.hypothesis_type, args.subset))
         features = convert_examples_to_features[task](
             examples,
             tokenizer,
+            num_choices=args.num_choices,
             label_list=label_list,
             max_length=args.max_seq_length,
             output_mode=output_mode,
@@ -599,7 +554,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
             pad_token=tokenizer.convert_tokens_to_ids(
                 [tokenizer.pad_token])[0],
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
-            no_passage=args.no_passage,
+            no_passage = args.no_passage,
         )
 
         if args.local_rank in [-1, 0]:
@@ -613,7 +568,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
     # Convert to Tensors and build dataset
 
-    if task in ['nli']:
+    if task in ['single_choice']:
         all_input_ids = torch.tensor([f.input_ids for f in features],
                                      dtype=torch.long)
         all_attention_mask = torch.tensor([f.attention_mask for f in features],
@@ -624,11 +579,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         if output_mode == "classification":
             all_labels = torch.tensor([f.label for f in features],
                                       dtype=torch.long)
-        elif output_mode == "regression":
-            all_labels = torch.tensor([f.label for f in features],
-                                      dtype=torch.float)
-    elif task in ['race2nli', 'dream2nli']:
-
+    elif task in ['multiple_choice']:
         all_input_ids = torch.tensor(
             select_field(features, "input_ids"), dtype=torch.long)
         all_attention_mask = torch.tensor(
@@ -680,6 +631,26 @@ def main():
         + ", ".join(processors.keys()),
     )
     parser.add_argument(
+        "--hypothesis_type",
+        default='hybrid',
+        type=str,
+        required=True,
+        help="The type of the hypothesis to use selected from the list: "
+        + ", ".join(['qa', 'rule', 'neural', 'hybrid']),
+    )
+    parser.add_argument(
+        "--num_choices",
+        default=4,
+        type=int,
+        required=True,
+        help="Number of answer options in the task.",
+    )
+    parser.add_argument(
+        "--subset",
+        action="store_true",
+        help="Whether to train/eval/test for only subset of the data"
+    )
+    parser.add_argument(
         "--output_dir",
         default=None,
         type=str,
@@ -719,14 +690,12 @@ def main():
         "--do_eval",
         action="store_true",
         help="Whether to run eval on the dev set.")
-    parser.add_argument(
-        "--do_test",
-        action="store_true",
-        help="Whether to run test on the test set")
+    parser.add_argument("--do_test", action="store_true", help="Whether to run test on the test set")
     parser.add_argument(
         "--save_preds",
         action="store_true",
-        help="Whether to save predictions.")
+        help="Whether to save predictions."
+    )
     parser.add_argument(
         "--evaluate_during_training",
         action="store_true",
@@ -738,8 +707,8 @@ def main():
         help="Set this flag if you are using an uncased model.",
     )
     parser.add_argument(
-        "--no_passage",
-        action="store_true",
+        "--no_passage", 
+        action="store_true", 
         help="Set this flag if you training only using answer options. This can be used to validate model behavior and to check if options don't leak the answer."
     )
 
@@ -766,11 +735,6 @@ def main():
         default=5e-5,
         type=float,
         help="The initial learning rate for Adam.")
-    parser.add_argument(
-        '--class_weights',
-        type=float,
-        nargs='+',
-        help='Class weights for loss calculation')
     parser.add_argument(
         "--weight_decay",
         default=0.0,
@@ -831,16 +795,6 @@ def main():
         help="Overwrite the cached training and evaluation sets",
     )
     parser.add_argument(
-        '--resume',
-        action='store_true',
-        help="set this if you want to resume training "
-        "using saved scheduler and optimizer states")
-    parser.add_argument(
-        '--global_step',
-        type=int,
-        help="Global step number to resume from. "
-        "Has to be passed when using --resume")
-    parser.add_argument(
         "--seed", type=int, default=42, help="random seed for initialization")
 
     parser.add_argument(
@@ -882,8 +836,7 @@ def main():
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args) if not (args.do_eval
-                                              or args.do_test) else args
+        args = reset_output_dir(args)
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
@@ -929,7 +882,6 @@ def main():
         bool(args.local_rank != -1),
         args.fp16,
     )
-    logger.info(f"Using  {args.n_gpu} gpus")
 
     # Set seed
     set_seed(args)
@@ -941,7 +893,7 @@ def main():
         raise ValueError("Task not found: %s" % (args.task_name))
     processor = processors[args.task_name]()
     args.output_mode = output_modes[args.task_name]
-    label_list = processor.get_labels()
+    label_list = processor.get_labels(args.num_choices)
     num_labels = len(label_list)
 
     # Load pretrained model and tokenizer
@@ -965,29 +917,12 @@ def main():
         do_lower_case=args.do_lower_case,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
-    model, loading_info = model_class.from_pretrained(
+    model = model_class.from_pretrained(
         args.model_name_or_path,
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
-        output_loading_info=True,
     )
-
-    for k, v in loading_info.items():
-        if v:
-            logger.warn(f"Issue with loading...")
-            logger.warn(f"{k}: {v}")
-
-    # set class weights on the model
-
-    if hasattr(model, 'class_weights'):
-        model.class_weights = args.class_weights
-        logger.info(f'Set class weights to {model.class_weights}')
-    else:
-        if args.class_weights is not None:
-            logger.warn(
-                'Class weights supplied but model does not have attribute class_weights'
-            )
 
     if args.local_rank == 0:
         torch.distributed.barrier(
@@ -1050,15 +985,10 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
-            true_checkpoint = False
-
-            if checkpoint.find("checkpoint") != -1:
-                true_checkpoint = True
-
-            global_step = checkpoint.split("-")[-1] if true_checkpoint else ""
-            # if we find multiple checkpoints, means the output_dir is
-            # parent of all ckpt dirs. We need the prefix then.
-            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 else ""
+            global_step = checkpoint.split(
+                "-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split(
+                "/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
@@ -1066,22 +996,7 @@ def main():
             result = evaluate(args, model, tokenizer, prefix=prefix)
 
             if global_step and args.wandb:
-                step = None
-                logger.info(
-                    f"Global step type={type(global_step)}, value= {global_step}"
-                )
-                try:
-                    step = int(global_step)
-                except ValueError as e:
-                    logger.warning(e)
-                    try:
-                        step = json.loads('{"' + global_step)["step"]
-                    except json.decoder.JSONDecodeError as je:
-                        logger.warning(je)
-                        logger.warning("not logging to wandb")
-
-                if step is not None:
-                    wandb_log(result, step=step)
+                wandb_log(result, step=json.loads('{"' + global_step)["step"])
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
@@ -1094,19 +1009,14 @@ def main():
         #     checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
         #     logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
-
         for checkpoint in checkpoints:
-            global_step = checkpoint.split(
-                "-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split(
-                "/")[-1] if len(checkpoints) > 1 and checkpoint.find(
-                    "checkpoint") != -1 else ""
+            global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix, test=True)
-            result = dict(
-                (k + "_{}".format(global_step), v) for k, v in result.items())
+            result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
     return results

@@ -1,0 +1,42 @@
+--task_name: {
+	type: str,
+	values: {
+		"single_choice" : If NLI scenario (entail/not-entiails),
+		"multiple_choice" : If QA scenario (multiple answer options)
+	}
+}
+
+--num_choices: {
+	type: int,
+	values: {
+		"single_choice" : 1 (doesnt really matter),
+		"multiple_choice": number of answer options
+	}
+}
+
+--model_type: {
+	type: str,
+	values: {
+		"roberta" : RobertaForSequenceClassification,
+		"roberta-mc" : RobertaForMultipleChoice,
+		"roberta-rev" : RobertaForSequenceClassification with Rev Tokenizer,
+		"roberta-mc-rev" : RobertaForMultipleChoice with Rev Tokenizer,
+	}
+}
+
+--hypothesis_type: {
+	type: str,
+	values: {
+		'qa': selects 'hypothesis_qa' column from data,
+		'rule': selects 'hypothesis_rule' column from data,
+		'neural': selects 'hypothesis_neural' column from data,
+		'hybrid': selects 'hypothesis_hybrid' column from data,
+	}
+}
+
+--subset: {
+	type: bool (implicit, no value required)
+	values: {
+		True if passed else False
+	}
+}
