@@ -859,8 +859,12 @@ def main():
     parser.add_argument(
         "--wandb", action="store_true", help="Use wandb or not")
     parser.add_argument(
+        "--wandb_entity",
+        default="ibm-cs696ds-2020",
+        help="Team or username if using wandb")
+    parser.add_argument(
         '--wandb_project',
-        default="",
+        default="nli4qa",
         help="To set project if using non default project")
     parser.add_argument("--wandb_run_name", default="")
     parser.add_argument(
