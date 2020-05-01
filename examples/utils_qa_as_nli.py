@@ -122,41 +122,44 @@ class MultipleChoiceInputFeatures(object):
 class DataProcessor():
     """Base class for data converters for QA as NLI tasks."""
 
-    def get_train_examples(self, data_dir, hypothesis_type, subset=False):
+    def get_train_examples(self, data_dir, hypothesis_type, subset=False , use_static_passage=False):
         """See base class."""
 
         if subset:
             return self._create_examples(
                 pd.read_json(os.path.join(
-                    data_dir, "train.json")).query('subset'), hypothesis_type)
+                    data_dir, "train.json")).query('subset'), 
+                hypothesis_type, use_static_passage)
         else:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "train.json")),
-                hypothesis_type)
+                hypothesis_type, use_static_passage)
 
-    def get_dev_examples(self, data_dir, hypothesis_type, subset=False):
+    def get_dev_examples(self, data_dir, hypothesis_type, subset=False, use_static_passage=False):
         """See base class."""
 
         if subset:
             return self._create_examples(
                 pd.read_json(os.path.join(
-                    data_dir, "dev.json")).query('subset'), hypothesis_type)
+                    data_dir, "dev.json")).query('subset'), 
+                hypothesis_type, use_static_passage)
         else:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "dev.json")),
-                hypothesis_type)
+                hypothesis_type, use_static_passage)
 
-    def get_test_examples(self, data_dir, hypothesis_type, subset=False):
+    def get_test_examples(self, data_dir, hypothesis_type, subset=False, use_static_passage=False):
         """See base class."""
 
         if subset:
             return self._create_examples(
                 pd.read_json(os.path.join(
-                    data_dir, "test.json")).query('subset'), hypothesis_type)
+                    data_dir, "test.json")).query('subset'), 
+                hypothesis_type, use_static_passage)
         else:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "test.json")),
-                hypothesis_type)
+                hypothesis_type, use_static_passage)
 
     def _create_examples(self, data, hypothesis_type):
         """Create a collection of `InputExample`s from the data"""
@@ -175,14 +178,16 @@ class SingleChoiceProcessor(DataProcessor):
 
         return [False, True]
 
-    def _create_examples(self, data, hypothesis_type):
+    def _create_examples(self, data, hypothesis_type, static=False):
         """Creates examples for the training and dev sets."""
         examples = []
         hyp_column = "_".join(["hypothesis", hypothesis_type])
+        if static:
+            logger.info("Using Static Premise!")
 
         for (i, row) in data.iterrows():
             guid = row['id']
-            premise = row['premise']
+            premise = row['premise'] if not static else row['premise_static']
             hypothesis = row[hyp_column]
             label = row['label']
             examples.append(
@@ -203,14 +208,16 @@ class MultipleChoiceProcessor(DataProcessor):
 
         return range(num_labels)
 
-    def _create_examples(self, data, hypothesis_type):
+    def _create_examples(self, data, hypothesis_type, static=False):
         """Creates examples for the training and dev sets."""
         examples = []
         hyp_column = "_".join(["hypothesis", hypothesis_type])
+        if static:
+            logger.info("Using Static Premise!")
 
         for (i, row) in data.iterrows():
             example_id = row['id']
-            premise = row['premise']
+            premise = row['premise'] if not static else row['premise_static']
             hypothesis_options = row[hyp_column]
             label = row['label']
             examples.append(

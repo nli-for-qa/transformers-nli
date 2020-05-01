@@ -267,6 +267,9 @@ def train(args, train_dataset, model, tokenizer):
 
     tr_loss, logging_loss = 0.0, 0.0
     model.zero_grad()
+    best_dev_acc = 0.0
+    best_steps = 0
+
     train_iterator = trange(
         epochs_trained,
         int(args.num_train_epochs),
@@ -359,6 +362,25 @@ def train(args, train_dataset, model, tokenizer):
                         for key, value in results.items():
                             logs[key] = value
 
+                        if results["eval_acc"] > best_dev_acc:
+                            best_dev_acc = results["eval_acc"]
+                            best_steps = global_step
+
+                            if args.do_test:
+                                results_test = evaluate(
+                                    args, model, tokenizer, test=True)
+
+                                # for key, value in results_test.items():
+                                #     tb_writer.add_scalar(
+                                #         "test_{}".format(key), value,
+                                #         global_step)
+                                logger.info(
+                                    "test acc: %s, loss: %s, global steps: %s",
+                                    str(results_test["eval_acc"]),
+                                    str(results_test["eval_loss"]),
+                                    str(global_step),
+                                )
+
                     loss_scalar = (tr_loss - logging_loss) / args.logging_steps
                     learning_rate_scalar = scheduler.get_lr()[0]
                     logs["lr"] = learning_rate_scalar
@@ -420,7 +442,7 @@ def train(args, train_dataset, model, tokenizer):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, tokenizer, prefix=""):
+def evaluate(args, model, tokenizer, prefix="", test=False):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_name = args.task_name
     eval_output_dir = args.output_dir
@@ -428,7 +450,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     results = {}
 
     eval_dataset = load_and_cache_examples(
-        args, eval_task_name, tokenizer, evaluate=True)
+        args, eval_task_name, tokenizer, evaluate=not test, test=test)
 
     if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(eval_output_dir)
@@ -494,11 +516,11 @@ def evaluate(args, model, tokenizer, prefix=""):
     acc = simple_accuracy(preds, out_label_ids)
 
     if args.save_preds:
-        pred_file = os.path.join(eval_output_dir, prefix, "eval_preds.txt")
+        pred_file = os.path.join(eval_output_dir, prefix, ("test" if test else "eval")+"_preds.txt")
         with open(pred_file, "w") as f:
             writer = csv.writer(f)
             writer.writerow(preds)
-        score_file = os.path.join(eval_output_dir, prefix, "eval_scores.txt")
+        score_file = os.path.join(eval_output_dir, prefix, ("test" if test else "eval")+"_scores.txt")
         with open(score_file, "w") as f:
             writer = csv.writer(f)
             writer.writerow(scores)
@@ -508,9 +530,10 @@ def evaluate(args, model, tokenizer, prefix=""):
     results.update(result)
 
     output_eval_file = os.path.join(eval_output_dir, prefix,
-                                    "eval_results.txt")
+                                    ("test" if test else "eval")+"_results.txt")
+    
     with open(output_eval_file, "w") as writer:
-        logger.info("***** Eval results {} *****".format(prefix))
+        logger.info("***** "+("Test" if test else "Eval")+" results {} *****".format(prefix))
 
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(result[key]))
@@ -519,19 +542,28 @@ def evaluate(args, model, tokenizer, prefix=""):
     return results
 
 
-def load_and_cache_examples(args, task, tokenizer, evaluate=False):
+def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
     if args.local_rank not in [-1, 0] and not evaluate:
         torch.distributed.barrier(
         )  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
 
     processor = processors[task]()
     output_mode = output_modes[task]
+
+    if evaluate:
+        cached_mode = "dev"
+    elif test:
+        cached_mode = "test"
+    else:
+        cached_mode = "train"
+    assert not (evaluate and test)
+
     # Load data features from cache or dataset file
     cached_features_file = os.path.join(
         args.data_dir,
         "cached_{}_{}_{}_{}_{}".format(
             args.hypothesis_type,
-            "dev" if evaluate else "train",
+            cached_mode,
             args.model_name_or_path.replace(
                 '/', '_'
             ),  # have the full path to avoid mixing of checkpoints of different models
@@ -542,7 +574,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         args.data_dir,
         "cached_subset_{}_{}_{}_{}_{}".format(
             args.hypothesis_type,
-            "dev" if evaluate else "train",
+            cached_mode,
             args.model_name_or_path.replace(
                 '/', '_'
             ),  # have the full path to avoid mixing of checkpoints of different models
@@ -559,10 +591,13 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         logger.info("Creating features from dataset file at %s", args.data_dir)
         label_list = processor.get_labels(args.num_choices)
 
-        examples = (processor.get_dev_examples(
-            args.data_dir, args.hypothesis_type, args.subset)
-            if evaluate else processor.get_train_examples(
-            args.data_dir, args.hypothesis_type, args.subset))
+        if evaluate:
+            examples = processor.get_dev_examples(args.data_dir, args.hypothesis_type, args.subset, args.static_passage)
+        elif test:
+            examples = processor.get_test_examples(args.data_dir, args.hypothesis_type, args.subset, args.static_passage)
+        else:
+            examples = processor.get_train_examples(args.data_dir, args.hypothesis_type, args.subset, args.static_passage)
+
         features = convert_examples_to_features[task](
             examples,
             tokenizer,
@@ -670,7 +705,13 @@ def main():
     parser.add_argument(
         "--subset",
         action="store_true",
-        help="Whether to train/eval/test for only subset of the data")
+        help="Whether to train/eval/test for only subset of the data"
+    )
+    parser.add_argument(
+        "--static_passage",
+        action="store_true",
+        help="Whether to use static passage."
+    )
     parser.add_argument(
         "--output_dir",
         default=None,
