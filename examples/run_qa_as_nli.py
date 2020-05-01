@@ -866,6 +866,12 @@ def main():
         '--wandb_project',
         default="nli4qa",
         help="To set project if using non default project")
+    parser.add_argument(
+        '--wandb_runid',
+        help="Run id. Unique to the project. "
+        "Should be supplied if (and only if) resuming a wandb logged run."
+        " For new runs, it is set by wandb.")
+
     parser.add_argument("--wandb_run_name", default="")
     parser.add_argument(
         "--tags",
