@@ -21,6 +21,7 @@ import pandas as pd
 
 import tqdm
 import json
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -117,36 +118,45 @@ class MultipleChoiceInputFeatures(object):
         } for input_ids, input_mask, segment_ids in choices_features]
         self.label = label
 
+
 class DataProcessor():
     """Base class for data converters for QA as NLI tasks."""
 
     def get_train_examples(self, data_dir, hypothesis_type, subset=False):
         """See base class."""
+
         if subset:
             return self._create_examples(
-                pd.read_json(os.path.join(data_dir, "train.json")).query('subset'), hypothesis_type)
+                pd.read_json(os.path.join(
+                    data_dir, "train.json")).query('subset'), hypothesis_type)
         else:
             return self._create_examples(
-                pd.read_json(os.path.join(data_dir, "train.json")), hypothesis_type)
+                pd.read_json(os.path.join(data_dir, "train.json")),
+                hypothesis_type)
 
     def get_dev_examples(self, data_dir, hypothesis_type, subset=False):
         """See base class."""
 
         if subset:
             return self._create_examples(
-                pd.read_json(os.path.join(data_dir, "dev.json")).query('subset'), hypothesis_type)
+                pd.read_json(os.path.join(
+                    data_dir, "dev.json")).query('subset'), hypothesis_type)
         else:
             return self._create_examples(
-                pd.read_json(os.path.join(data_dir, "dev.json")), hypothesis_type)
+                pd.read_json(os.path.join(data_dir, "dev.json")),
+                hypothesis_type)
 
     def get_test_examples(self, data_dir, hypothesis_type, subset=False):
         """See base class."""
+
         if subset:
             return self._create_examples(
-                pd.read_json(os.path.join(data_dir, "test.json")).query('subset'), hypothesis_type)
+                pd.read_json(os.path.join(
+                    data_dir, "test.json")).query('subset'), hypothesis_type)
         else:
             return self._create_examples(
-                pd.read_json(os.path.join(data_dir, "test.json")), hypothesis_type)
+                pd.read_json(os.path.join(data_dir, "test.json")),
+                hypothesis_type)
 
     def _create_examples(self, data, hypothesis_type):
         """Create a collection of `InputExample`s from the data"""
@@ -155,6 +165,7 @@ class DataProcessor():
     def get_labels(self, num_labels):
         """Gets the list of labels for this data set."""
         raise NotImplementedError()
+
 
 class SingleChoiceProcessor(DataProcessor):
     """Processor for the RACE converted to NLI data set."""
@@ -270,40 +281,23 @@ def single_choice_convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d/%d" % (ex_index, len(examples)))
 
-        inputs = tokenizer.encode_plus(example.hypothesis,add_special_tokens=True,max_length=max_length) if no_passage else tokenizer.encode_plus(example.premise,example.hypothesis,add_special_tokens=True,max_length=max_length)
-
-        input_ids, token_type_ids = inputs["input_ids"], inputs[
-            "token_type_ids"]
+        inputs = tokenizer.encode_plus(
+            example.hypothesis,
+            add_special_tokens=True,
+            return_token_type_ids=True,
+            pad_to_max_length=True,
+            return_attention_mask=True,
+            max_length=max_length) if no_passage else tokenizer.encode_plus(
+                example.premise,
+                example.hypothesis,
+                pad_to_max_length=True,
+                add_special_tokens=True,
+                return_token_type_ids=True,
+                return_attention_mask=True,
+                max_length=max_length)
 
         # The mask has 1 for real tokens and 0 for padding tokens. Only real
         # tokens are attended to.
-        attention_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
-
-        # Zero-pad up to the sequence length.
-        padding_length = max_length - len(input_ids)
-
-        if pad_on_left:
-            input_ids = ([pad_token] * padding_length) + input_ids
-            attention_mask = ([0 if mask_padding_with_zero else 1]
-                              * padding_length) + attention_mask
-            token_type_ids = (
-                [pad_token_segment_id] * padding_length) + token_type_ids
-        else:
-            input_ids = input_ids + ([pad_token] * padding_length)
-            attention_mask = attention_mask + (
-                [0 if mask_padding_with_zero else 1] * padding_length)
-            token_type_ids = token_type_ids + (
-                [pad_token_segment_id] * padding_length)
-
-        assert len(input_ids
-                   ) == max_length, "Error with input length {} vs {}".format(
-                       len(input_ids), max_length)
-        assert len(attention_mask
-                   ) == max_length, "Error with input length {} vs {}".format(
-                       len(attention_mask), max_length)
-        assert len(token_type_ids
-                   ) == max_length, "Error with input length {} vs {}".format(
-                       len(token_type_ids), max_length)
 
         if output_mode == "classification":
             label = label_map[example.label]
@@ -315,20 +309,15 @@ def single_choice_convert_examples_to_features(
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
-            logger.info(
-                "input_ids: %s" % " ".join([str(x) for x in input_ids]))
+            logger.info("input_ids: %s" % " ".join(
+                [str(x) for x in inputs['input_ids']]))
             logger.info("attention_mask: %s" % " ".join(
-                [str(x) for x in attention_mask]))
+                [str(x) for x in inputs['attention_mask']]))
             logger.info("token_type_ids: %s" % " ".join(
-                [str(x) for x in token_type_ids]))
+                [str(x) for x in inputs['token_type_ids']]))
             logger.info("label: %s (id = %d)" % (example.label, label))
 
-        features.append(
-            SingelChoiceInputFeatures(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                label=label))
+        features.append(SingelChoiceInputFeatures(**inputs, label=label))
 
     return features
 
@@ -372,14 +361,14 @@ def multiple_choice_convert_examples_to_features(
     """
 
     if task is not None:
-        processor = nli_processors[task]()
+        processor = processors[task]()
 
         if label_list is None:
             label_list = processor.get_labels(num_choices)
             logger.info("Using label list %s for task %s" % (label_list, task))
 
         if output_mode is None:
-            output_mode = nli_output_modes[task]
+            output_mode = output_modes[task]
             logger.info(
                 "Using output mode %s for task %s" % (output_mode, task))
 
@@ -393,44 +382,40 @@ def multiple_choice_convert_examples_to_features(
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         choices_features = []
-        assert(len(example.options) == num_choices)
+        assert (len(example.options) == num_choices)
 
         for option in example.options:
             text_a = example.premise
             text_b = option
 
-            inputs = tokenizer.encode_plus(text_b, add_special_tokens=True, max_length=max_length,) if no_passage else tokenizer.encode_plus(text_a, text_b, add_special_tokens=True, max_length=max_length,)
+            inputs = tokenizer.encode_plus(
+                text_b,
+                add_special_tokens=True,
+                pad_to_max_length=True,
+                return_token_type_ids=True,
+                return_attention_mask=True,
+                max_length=max_length,
+            ) if no_passage else tokenizer.encode_plus(
+                text_a,
+                text_b,
+                add_special_tokens=True,
+                pad_to_max_length=True,
+                max_length=max_length,
+                return_token_type_ids=True,
+                return_attention_mask=True)
 
             if "num_truncated_tokens" in inputs and inputs[
                     "num_truncated_tokens"] > 0:
-                logger.info(
-                    "Attention! you are cropping tokens (swag task is ok). "
-                    "If you are training ARC and RACE and you are poping question + options,"
-                    "you need to try to use a bigger max seq length!")
+                logger.warning(
+                    f"Attention! you are cropping {inputs['num_trunvated_tokens']} tokens for {example.example_id} "
+                )
 
             input_ids, token_type_ids = inputs["input_ids"], inputs[
                 "token_type_ids"]
 
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
-            attention_mask = [1 if mask_padding_with_zero else 0
-                              ] * len(input_ids)
-
-            # Zero-pad up to the sequence length.
-            padding_length = max_length - len(input_ids)
-
-            if pad_on_left:
-                input_ids = ([pad_token] * padding_length) + input_ids
-                attention_mask = ([0 if mask_padding_with_zero else 1]
-                                  * padding_length) + attention_mask
-                token_type_ids = (
-                    [pad_token_segment_id] * padding_length) + token_type_ids
-            else:
-                input_ids = input_ids + ([pad_token] * padding_length)
-                attention_mask = attention_mask + (
-                    [0 if mask_padding_with_zero else 1] * padding_length)
-                token_type_ids = token_type_ids + (
-                    [pad_token_segment_id] * padding_length)
+            attention_mask = inputs['attention_mask']
 
             assert len(input_ids) == max_length
             assert len(attention_mask) == max_length
@@ -463,6 +448,7 @@ def multiple_choice_convert_examples_to_features(
             ))
 
     return features
+
 
 processors = {
     "single_choice": SingleChoiceProcessor,

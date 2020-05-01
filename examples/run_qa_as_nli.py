@@ -36,6 +36,8 @@ from transformers import (
     RobertaForSequenceClassification,
     RobertaForMultipleChoice,
     RobertaTokenizer,
+    RobertaForTransferableMCQ,
+    RobertaForTransferableEntailment,
     get_linear_schedule_with_warmup,
 )
 
@@ -53,9 +55,8 @@ from wandb_utils import init as wandb_init
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = sum(
-    (tuple(conf.pretrained_config_archive_map.keys()) for conf in (
-        RobertaConfig,
-    )),
+    (tuple(conf.pretrained_config_archive_map.keys())
+     for conf in (RobertaConfig, )),
     (),
 )
 
@@ -89,13 +90,20 @@ class RobertaTokenizerRev(RobertaTokenizer):
 
 MODEL_CLASSES = {
     "roberta": (RobertaConfig, RobertaForSequenceClassification,
-                    RobertaTokenizer),
-    "roberta-mc": (RobertaConfig, RobertaForMultipleChoice,
-                   RobertaTokenizer),
+                RobertaTokenizer),
+    "roberta-mc": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
     "roberta-rev": (RobertaConfig, RobertaForSequenceClassification,
                     RobertaTokenizerRev),
     "roberta-mc-rev": (RobertaConfig, RobertaForMultipleChoice,
-                   RobertaTokenizerRev),
+                       RobertaTokenizerRev),
+    "roberta-nli-transferable":
+    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizer),
+    "roberta-nli-transferable-rev":
+    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizerRev),
+    "roberta-mc-transferable": (RobertaConfig, RobertaForTransferableMCQ,
+                                RobertaTokenizer),
+    "roberta-mc-transferable-rev": (RobertaConfig, RobertaForTransferableMCQ,
+                                    RobertaTokenizerRev),
 }
 
 
@@ -121,18 +129,7 @@ def train(args, train_dataset, model, tokenizer):
     """ Train the model """
 
     if args.local_rank in [-1, 0]:
-        tensorboard_log_dir = os.path.join("tensorboard", 
-            args.data_dir.split('/')[6],
-            args.hypothesis_type,
-            ("subset" if args.subset else "full"),
-            "_".join([args.model_name_or_path,
-                str(args.max_seq_length), 
-                str(max(1,args.n_gpu)* args.gradient_accumulation_steps * args.per_gpu_train_batch_size),
-                str(args.learning_rate),
-                str(args.weight_decay),
-                str(args.warmup_steps)]),
-            str(args.seed)
-            )
+        tensorboard_log_dir = os.path.join(args.output_dir, 'tb_logs')
         logger.info("Tensorboard dir: %s", tensorboard_log_dir)
         tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
@@ -186,14 +183,23 @@ def train(args, train_dataset, model, tokenizer):
 
     # Check if saved optimizer or scheduler states exist
 
-    if os.path.isfile(os.path.join(
-            args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
-                os.path.join(args.model_name_or_path, "scheduler.pt")):
-        # Load in optimizer and scheduler states
-        optimizer.load_state_dict(
-            torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
-        scheduler.load_state_dict(
-            torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
+    if args.resume:
+        opt_path = os.path.join(args.model_name_or_path, "optimizer.pt")
+        sch_path = os.path.join(args.model_name_or_path, "scheduler.pt")
+
+        if os.path.isfile(opt_path) and os.path.isfile(sch_path):
+            # Load in optimizer and scheduler states
+            optimizer.load_state_dict(torch.load(opt_path))
+            scheduler.load_state_dict(torch.load(sch_path))
+        else:
+            raise RuntimeError(
+                f"--resume was set but there are no optimizer and scheduler states at {opt_path} and {sch_path}"
+            )
+
+    else:
+        logger.info(
+            "Not checking for optimizer and scheduler state as --resume was not set. Starting afresh"
+        )
 
     if args.fp16:
         try:
@@ -240,9 +246,12 @@ def train(args, train_dataset, model, tokenizer):
     steps_trained_in_current_epoch = 0
     # Check if continuing training from a checkpoint
 
-    if os.path.exists(args.model_name_or_path):
-        # set global_step to gobal_step of last saved checkpoint from model path
-        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
+    if args.resume:
+        if not args.global_step:
+            raise ValueError(
+                "--global_step (int) has to be set when using --resume."
+                " It will not be set automatically based on dir name.")
+        global_step = args.global_step
         epochs_trained = global_step // (
             len(train_dataloader) // args.gradient_accumulation_steps)
         steps_trained_in_current_epoch = global_step % (
@@ -265,6 +274,15 @@ def train(args, train_dataset, model, tokenizer):
         disable=args.local_rank not in [-1, 0],
     )
     set_seed(args)  # Added here for reproductibility
+    # to an eval before training as best practice
+
+    if args.evaluate_during_training and args.local_rank in [-1, 0]:
+        logger.info("Running an eval loop before training ...")
+        temp_res = evaluate(args, model, tokenizer)
+
+        if args.wandb:
+            wandb_log({**temp_res, **{"step": 0}})
+        logger.info("Zero shot eval metrics\n{}".format(temp_res))
 
     for _ in train_iterator:
         epoch_iterator = tqdm(
@@ -351,10 +369,12 @@ def train(args, train_dataset, model, tokenizer):
                         "Performance at global step: %s",
                         str(global_step),
                     )
+
                     for key, value in logs.items():
                         logger.info("  %s = %s", key, str(value))
                         tb_writer.add_scalar(key, value, global_step)
                     # print(json.dumps({**logs, **{"step": global_step}}))
+
                     if args.wandb:
                         wandb_log({**logs, **{"step": global_step}})
 
@@ -413,18 +433,15 @@ def evaluate(args, model, tokenizer, prefix=""):
     if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(eval_output_dir)
 
-    args.eval_batch_size = args.per_gpu_eval_batch_size * max(
-        1, args.n_gpu)
+    args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(
-        eval_dataset,
-        sampler=eval_sampler,
-        batch_size=args.eval_batch_size)
+        eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
     # multi-gpu eval
 
-    if args.n_gpu > 1:
+    if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
         model = torch.nn.DataParallel(model)
 
     # Eval!
@@ -449,9 +466,9 @@ def evaluate(args, model, tokenizer, prefix=""):
 
             if args.model_type != "distilbert":
                 inputs["token_type_ids"] = (
-                    batch[2] if args.model_type in [
-                        "bert", "xlnet", "albert"
-                    ] else None
+                    batch[2]
+
+                    if args.model_type in ["bert", "xlnet", "albert"] else None
                 )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
             outputs = model(**inputs)
             tmp_eval_loss, logits = outputs[:2]
@@ -465,9 +482,7 @@ def evaluate(args, model, tokenizer, prefix=""):
         else:
             scores = np.append(scores, logits.detach().cpu().numpy(), axis=0)
             out_label_ids = np.append(
-                out_label_ids,
-                inputs["labels"].detach().cpu().numpy(),
-                axis=0)
+                out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
     eval_loss = eval_loss / nb_eval_steps
 
@@ -487,7 +502,7 @@ def evaluate(args, model, tokenizer, prefix=""):
         with open(score_file, "w") as f:
             writer = csv.writer(f)
             writer.writerow(scores)
-    
+
     result = {"eval_acc": acc, "eval_loss": eval_loss}
 
     results.update(result)
@@ -517,20 +532,24 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         "cached_{}_{}_{}_{}_{}".format(
             args.hypothesis_type,
             "dev" if evaluate else "train",
-            list(filter(None, args.model_name_or_path.split("/"))).pop(),
+            args.model_name_or_path.replace(
+                '/', '_'
+            ),  # have the full path to avoid mixing of checkpoints of different models
             str(args.max_seq_length),
             str(task),
         ),
     ) if not args.subset else os.path.join(
-            args.data_dir,
-            "cached_subset_{}_{}_{}_{}_{}".format(
-                args.hypothesis_type,
-                "dev" if evaluate else "train",
-                list(filter(None, args.model_name_or_path.split("/"))).pop(),
-                str(args.max_seq_length),
-                str(task),
-            ),
-        )
+        args.data_dir,
+        "cached_subset_{}_{}_{}_{}_{}".format(
+            args.hypothesis_type,
+            "dev" if evaluate else "train",
+            args.model_name_or_path.replace(
+                '/', '_'
+            ),  # have the full path to avoid mixing of checkpoints of different models
+            str(args.max_seq_length),
+            str(task),
+        ),
+    )
 
     if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s",
@@ -540,8 +559,10 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         logger.info("Creating features from dataset file at %s", args.data_dir)
         label_list = processor.get_labels(args.num_choices)
 
-        examples = (processor.get_dev_examples(args.data_dir, args.hypothesis_type, args.subset) if evaluate else
-                    processor.get_train_examples(args.data_dir, args.hypothesis_type, args.subset))
+        examples = (processor.get_dev_examples(
+            args.data_dir, args.hypothesis_type, args.subset)
+            if evaluate else processor.get_train_examples(
+            args.data_dir, args.hypothesis_type, args.subset))
         features = convert_examples_to_features[task](
             examples,
             tokenizer,
@@ -554,7 +575,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
             pad_token=tokenizer.convert_tokens_to_ids(
                 [tokenizer.pad_token])[0],
             pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
-            no_passage = args.no_passage,
+            no_passage=args.no_passage,
         )
 
         if args.local_rank in [-1, 0]:
@@ -635,6 +656,7 @@ def main():
         default='hybrid',
         type=str,
         required=True,
+        choices=['qa', 'rule', 'neural', 'hybrid'],
         help="The type of the hypothesis to use selected from the list: "
         + ", ".join(['qa', 'rule', 'neural', 'hybrid']),
     )
@@ -648,15 +670,15 @@ def main():
     parser.add_argument(
         "--subset",
         action="store_true",
-        help="Whether to train/eval/test for only subset of the data"
-    )
+        help="Whether to train/eval/test for only subset of the data")
     parser.add_argument(
         "--output_dir",
         default=None,
         type=str,
         required=True,
-        help="The output directory where the model predictions and checkpoints will be written.",
-    )
+        help="The output directory where the model predictions "
+        "and checkpoints will be written. If using wandb, this will be ignored and output dir"
+        " will be created by wandb and printed in the log.")
 
     # Other parameters
     parser.add_argument(
@@ -690,12 +712,14 @@ def main():
         "--do_eval",
         action="store_true",
         help="Whether to run eval on the dev set.")
-    parser.add_argument("--do_test", action="store_true", help="Whether to run test on the test set")
+    parser.add_argument(
+        "--do_test",
+        action="store_true",
+        help="Whether to run test on the test set")
     parser.add_argument(
         "--save_preds",
         action="store_true",
-        help="Whether to save predictions."
-    )
+        help="Whether to save predictions.")
     parser.add_argument(
         "--evaluate_during_training",
         action="store_true",
@@ -707,8 +731,8 @@ def main():
         help="Set this flag if you are using an uncased model.",
     )
     parser.add_argument(
-        "--no_passage", 
-        action="store_true", 
+        "--no_passage",
+        action="store_true",
         help="Set this flag if you training only using answer options. This can be used to validate model behavior and to check if options don't leak the answer."
     )
 
@@ -795,6 +819,16 @@ def main():
         help="Overwrite the cached training and evaluation sets",
     )
     parser.add_argument(
+        '--resume',
+        action='store_true',
+        help="set this if you want to resume training "
+        "using saved scheduler and optimizer states")
+    parser.add_argument(
+        '--global_step',
+        type=int,
+        help="Global step number to resume from. "
+        "Has to be passed when using --resume")
+    parser.add_argument(
         "--seed", type=int, default=42, help="random seed for initialization")
 
     parser.add_argument(
@@ -822,9 +856,19 @@ def main():
     parser.add_argument(
         "--wandb", action="store_true", help="Use wandb or not")
     parser.add_argument(
+        "--wandb_entity",
+        default="ibm-cs696ds-2020",
+        help="Team or username if using wandb")
+    parser.add_argument(
         '--wandb_project',
-        default="",
+        default="nli4qa",
         help="To set project if using non default project")
+    parser.add_argument(
+        '--wandb_runid',
+        help="Run id. Unique to the project. "
+        "Should be supplied if (and only if) resuming a wandb logged run."
+        " For new runs, it is set by wandb.")
+
     parser.add_argument("--wandb_run_name", default="")
     parser.add_argument(
         "--tags",
@@ -836,7 +880,8 @@ def main():
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args)
+        args = reset_output_dir(args) if not (args.do_eval
+                                              or args.do_test) else args
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
@@ -882,6 +927,7 @@ def main():
         bool(args.local_rank != -1),
         args.fp16,
     )
+    logger.info(f"Using  {args.n_gpu} gpus")
 
     # Set seed
     set_seed(args)
@@ -917,12 +963,22 @@ def main():
         do_lower_case=args.do_lower_case,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
-    model = model_class.from_pretrained(
+    model, loading_info = model_class.from_pretrained(
         args.model_name_or_path,
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
         cache_dir=args.cache_dir if args.cache_dir else None,
+        output_loading_info=True,
     )
+
+    for k, v in loading_info.items():
+        if v:
+            logger.warning(f"Possible issue with loading...")
+            logger.warning(f"{k}: {v}")
+            logger.info(
+                "Code optimizes memory by discarding unused weights from the"
+                " base model if the message above refers to these weights"
+                " then it can be safely ignored.")
 
     if args.local_rank == 0:
         torch.distributed.barrier(
@@ -985,10 +1041,15 @@ def main():
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
-            global_step = checkpoint.split(
-                "-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split(
-                "/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
+            true_checkpoint = False
+
+            if checkpoint.find("checkpoint") != -1:
+                true_checkpoint = True
+
+            global_step = checkpoint.split("-")[-1] if true_checkpoint else ""
+            # if we find multiple checkpoints, means the output_dir is
+            # parent of all ckpt dirs. We need the prefix then.
+            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
@@ -996,7 +1057,24 @@ def main():
             result = evaluate(args, model, tokenizer, prefix=prefix)
 
             if global_step and args.wandb:
-                wandb_log(result, step=json.loads('{"' + global_step)["step"])
+                step = None
+                logger.debug(
+                    f"Global step type={type(global_step)}, value= {global_step}"
+                )
+                try:
+                    step = int(global_step)
+                except ValueError as e:
+                    logger.info("Global step not readable")
+                    logger.error(e)
+                    try:
+                        step = json.loads('{"' + global_step)["step"]
+                    except json.decoder.JSONDecodeError as je:
+                        logger.error(je)
+                        logger.error(
+                            "Cannot read global step. Not logging to wandb")
+
+                if step is not None:
+                    wandb_log(result, step=step)
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
@@ -1009,14 +1087,19 @@ def main():
         #     checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
         #     logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
+
         for checkpoint in checkpoints:
-            global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 and checkpoint.find("checkpoint") != -1 else ""
+            global_step = checkpoint.split(
+                "-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split(
+                "/")[-1] if len(checkpoints) > 1 and checkpoint.find(
+                    "checkpoint") != -1 else ""
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=prefix, test=True)
-            result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
+            result = dict(
+                (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
 
     return results
