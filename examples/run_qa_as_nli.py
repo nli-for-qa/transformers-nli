@@ -129,19 +129,7 @@ def train(args, train_dataset, model, tokenizer):
     """ Train the model """
 
     if args.local_rank in [-1, 0]:
-        tensorboard_log_dir = os.path.join(
-            "tensorboard",
-            args.data_dir.split('/')[6], args.hypothesis_type,
-            ("subset" if args.subset else "full"), "_".join([
-                args.model_name_or_path,
-                str(args.max_seq_length),
-                str(
-                    max(1, args.n_gpu) * args.gradient_accumulation_steps
-                    * args.per_gpu_train_batch_size),
-                str(args.learning_rate),
-                str(args.weight_decay),
-                str(args.warmup_steps)
-            ]), str(args.seed))
+        tensorboard_log_dir = os.path.join(args.output_dir, 'tb_logs')
         logger.info("Tensorboard dir: %s", tensorboard_log_dir)
         tb_writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
@@ -286,6 +274,15 @@ def train(args, train_dataset, model, tokenizer):
         disable=args.local_rank not in [-1, 0],
     )
     set_seed(args)  # Added here for reproductibility
+    # to an eval before training as best practice
+
+    if args.evaluate_during_training and args.local_rank in [-1, 0]:
+        logger.info("Running an eval loop before training ...")
+        temp_res = evaluate(args, model, tokenizer)
+
+        if args.wandb:
+            wandb_log({**temp_res, **{"step": 0}})
+        logger.info("Zero shot eval metrics\n{}".format(temp_res))
 
     for _ in train_iterator:
         epoch_iterator = tqdm(
@@ -976,8 +973,8 @@ def main():
 
     for k, v in loading_info.items():
         if v:
-            logger.warn(f"Issue with loading...")
-            logger.warn(f"{k}: {v}")
+            logger.warning(f"Possible issue with loading...")
+            logger.warning(f"{k}: {v}")
             logger.info(
                 "Code optimizes memory by discarding unused weights from the"
                 " base model if the message above refers to these weights"
