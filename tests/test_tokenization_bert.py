@@ -38,7 +38,7 @@ class BertTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
     test_rust_tokenizer = True
 
     def setUp(self):
-        super(BertTokenizationTest, self).setUp()
+        super().setUp()
 
         vocab_tokens = [
             "[UNK]",
@@ -82,7 +82,7 @@ class BertTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             return
 
         tokenizer = self.get_tokenizer()
-        rust_tokenizer = self.get_rust_tokenizer(add_special_tokens=False)
+        rust_tokenizer = self.get_rust_tokenizer()
 
         sequence = "UNwant\u00E9d,running"
 
@@ -91,7 +91,7 @@ class BertTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         self.assertListEqual(tokens, rust_tokens)
 
         ids = tokenizer.encode(sequence, add_special_tokens=False)
-        rust_ids = rust_tokenizer.encode(sequence)
+        rust_ids = rust_tokenizer.encode(sequence, add_special_tokens=False)
         self.assertListEqual(ids, rust_ids)
 
         rust_tokenizer = self.get_rust_tokenizer()
@@ -117,6 +117,13 @@ class BertTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 
         self.assertListEqual(
             tokenizer.tokenize(" \tHeLLo!how  \n Are yoU?  "), ["HeLLo", "!", "how", "Are", "yoU", "?"]
+        )
+
+    def test_basic_tokenizer_respects_never_split_tokens(self):
+        tokenizer = BasicTokenizer(do_lower_case=False, never_split=["[UNK]"])
+
+        self.assertListEqual(
+            tokenizer.tokenize(" \tHeLLo!how  \n Are yoU? [UNK]"), ["HeLLo", "!", "how", "Are", "yoU", "?", "[UNK]"]
         )
 
     def test_wordpiece_tokenizer(self):

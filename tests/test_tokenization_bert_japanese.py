@@ -35,7 +35,7 @@ class BertJapaneseTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
     tokenizer_class = BertJapaneseTokenizer
 
     def setUp(self):
-        super(BertJapaneseTokenizationTest, self).setUp()
+        super().setUp()
 
         vocab_tokens = [
             "[UNK]",
@@ -91,6 +91,20 @@ class BertJapaneseTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             ["アップルストア", "で", "iphone", "8", "が", "発売", "さ", "れ", "た", "。"],
         )
 
+    def test_mecab_tokenizer_with_option(self):
+        try:
+            tokenizer = MecabTokenizer(
+                do_lower_case=True, normalize_text=False, mecab_option="-d /usr/local/lib/mecab/dic/jumandic"
+            )
+        except RuntimeError:
+            # if dict doesn't exist in the system, previous code raises this error.
+            return
+
+        self.assertListEqual(
+            tokenizer.tokenize(" \tｱｯﾌﾟﾙストアでiPhone８ が  \n 発売された　。  "),
+            ["ｱｯﾌﾟﾙストア", "で", "iPhone", "８", "が", "発売", "さ", "れた", "\u3000", "。"],
+        )
+
     def test_mecab_tokenizer_no_normalize(self):
         tokenizer = MecabTokenizer(normalize_text=False)
 
@@ -135,7 +149,7 @@ class BertJapaneseCharacterTokenizationTest(TokenizerTesterMixin, unittest.TestC
     tokenizer_class = BertJapaneseTokenizer
 
     def setUp(self):
-        super(BertJapaneseCharacterTokenizationTest, self).setUp()
+        super().setUp()
 
         vocab_tokens = ["[UNK]", "[CLS]", "[SEP]", "こ", "ん", "に", "ち", "は", "ば", "世", "界", "、", "。"]
 
