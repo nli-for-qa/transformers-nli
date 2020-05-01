@@ -95,11 +95,11 @@ MODEL_CLASSES = {
     "roberta-rev": (RobertaConfig, RobertaForSequenceClassification,
                     RobertaTokenizerRev),
     "roberta-mc-rev": (RobertaConfig, RobertaForMultipleChoice,
-                       "roberta-nli-transferable":
-                       (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizer),
-                       "roberta-nli-transferable-rev":
-                       (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizerRev),
                        RobertaTokenizerRev),
+    "roberta-nli-transferable":
+    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizer),
+    "roberta-nli-transferable-rev":
+    (RobertaConfig, RobertaForTransferableEntailment, RobertaTokenizerRev),
     "roberta-mc-transferable": (RobertaConfig, RobertaForTransferableMCQ,
                                 RobertaTokenizer),
     "roberta-mc-transferable-rev": (RobertaConfig, RobertaForTransferableMCQ,
@@ -535,7 +535,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         "cached_{}_{}_{}_{}_{}".format(
             args.hypothesis_type,
             "dev" if evaluate else "train",
-            args.model_name_or_path.replace('/', '_'),  # have the full path to avoid mixing of checkpoints of different models
+            args.model_name_or_path.replace(
+                '/', '_'
+            ),  # have the full path to avoid mixing of checkpoints of different models
             str(args.max_seq_length),
             str(task),
         ),
@@ -544,7 +546,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
         "cached_subset_{}_{}_{}_{}_{}".format(
             args.hypothesis_type,
             "dev" if evaluate else "train",
-            args.model_name_or_path.replace('/', '_'),  # have the full path to avoid mixing of checkpoints of different models
+            args.model_name_or_path.replace(
+                '/', '_'
+            ),  # have the full path to avoid mixing of checkpoints of different models
             str(args.max_seq_length),
             str(task),
         ),
@@ -560,7 +564,6 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False):
 
         examples = (processor.get_dev_examples(
             args.data_dir, args.hypothesis_type, args.subset)
-
             if evaluate else processor.get_train_examples(
             args.data_dir, args.hypothesis_type, args.subset))
         features = convert_examples_to_features[task](
@@ -655,7 +658,8 @@ def main():
         "--hypothesis_type",
         default='hybrid',
         type=str,
-        required=True, choices=['qa', 'rule', 'neural', 'hybrid'],
+        required=True,
+        choices=['qa', 'rule', 'neural', 'hybrid'],
         help="The type of the hypothesis to use selected from the list: "
         + ", ".join(['qa', 'rule', 'neural', 'hybrid']),
     )
@@ -677,8 +681,7 @@ def main():
         required=True,
         help="The output directory where the model predictions "
         "and checkpoints will be written. If using wandb, this will be ignored and output dir"
-        " will be created by wandb and printed in the log."
-    )
+        " will be created by wandb and printed in the log.")
 
     # Other parameters
     parser.add_argument(
@@ -965,9 +968,10 @@ def main():
         if v:
             logger.warn(f"Issue with loading...")
             logger.warn(f"{k}: {v}")
-            logger.info("Code optimizes memory by discarding unused weights from the"
-                        " base model if the message above refers to these weights"
-                        " then it can be safely ignored.")
+            logger.info(
+                "Code optimizes memory by discarding unused weights from the"
+                " base model if the message above refers to these weights"
+                " then it can be safely ignored.")
 
     if args.local_rank == 0:
         torch.distributed.barrier(
@@ -1059,7 +1063,8 @@ def main():
                         step = json.loads('{"' + global_step)["step"]
                     except json.decoder.JSONDecodeError as je:
                         logger.error(je)
-                        logger.error("Cannot read global step. Not logging to wandb")
+                        logger.error(
+                            "Cannot read global step. Not logging to wandb")
 
                 if step is not None:
                     wandb_log(result, step=step)
