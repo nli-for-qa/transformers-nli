@@ -439,6 +439,9 @@ def train(args, train_dataset, model, tokenizer):
     if args.local_rank in [-1, 0]:
         tb_writer.close()
 
+    if best_steps:
+        logger.info("Best eval acc = %f at following steps: %s", best_steps, best_steps)
+
     return global_step, tr_loss / global_step
 
 
