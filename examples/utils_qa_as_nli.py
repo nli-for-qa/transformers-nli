@@ -122,39 +122,43 @@ class MultipleChoiceInputFeatures(object):
 class DataProcessor():
     """Base class for data converters for QA as NLI tasks."""
 
-    def get_train_examples(self, data_dir, hypothesis_type, subset=False , use_static_passage=False):
+    def get_train_examples(self, data_dir, hypothesis_type, subset=None , use_static_passage=False):
         """See base class."""
 
-        if subset:
+        if subset in ['rule', 'neural']:
             return self._create_examples(
                 pd.read_json(os.path.join(
-                    data_dir, "train.json")).query('subset'), 
+                    data_dir, "train.json")).query('_'.join(['subset', subset])), 
                 hypothesis_type, use_static_passage)
-        else:
+        elif subset is None:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "train.json")),
                 hypothesis_type, use_static_passage)
+        else:
+            raise ValueError("Invalid subset flag")
 
-    def get_dev_examples(self, data_dir, hypothesis_type, subset=False, use_static_passage=False):
+    def get_dev_examples(self, data_dir, hypothesis_type, subset=None, use_static_passage=False):
         """See base class."""
 
-        if subset:
+        if subset in ['rule', 'neural']:
             return self._create_examples(
                 pd.read_json(os.path.join(
-                    data_dir, "dev.json")).query('subset'), 
+                    data_dir, "dev.json")).query('_'.join(['subset', subset])), 
                 hypothesis_type, use_static_passage)
-        else:
+        elif subset is None:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "dev.json")),
                 hypothesis_type, use_static_passage)
+        else:
+            raise ValueError("Invalid subset flag")
 
-    def get_test_examples(self, data_dir, hypothesis_type, subset=False, use_static_passage=False):
+    def get_test_examples(self, data_dir, hypothesis_type, subset=None, use_static_passage=False):
         """See base class."""
 
-        if subset:
+        if subset in ['rule', 'neural']:
             return self._create_examples(
                 pd.read_json(os.path.join(
-                    data_dir, "test.json")).query('subset'), 
+                    data_dir, "test.json")).query('_'.join(['subset', subset])), 
                 hypothesis_type, use_static_passage)
         else:
             return self._create_examples(
