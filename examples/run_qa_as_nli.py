@@ -707,8 +707,10 @@ def main():
     )
     parser.add_argument(
         "--subset",
-        action="store_true",
-        help="Whether to train/eval/test for only subset of the data"
+        default=None,
+        type=str,
+        choices=['rule', 'neural']
+        help="Which subset of data to use."
     )
     parser.add_argument(
         "--static_passage",
