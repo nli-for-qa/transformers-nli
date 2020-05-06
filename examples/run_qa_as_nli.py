@@ -575,7 +575,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
         ),
     ) if not args.subset else os.path.join(
         args.data_dir,
-        "cached_{}_{}_{}_{}_{}_{}".format(
+        "cached_subset-{}_{}_{}_{}_{}_{}".format(
             args.subset,
             args.hypothesis_type,
             cached_mode,
