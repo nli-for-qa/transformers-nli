@@ -710,7 +710,7 @@ def main():
         "--subset",
         default=None,
         type=str,
-        choices=['rule', 'neural']
+        choices=['rule', 'neural'],
         help="Which subset of data to use."
     )
     parser.add_argument(
