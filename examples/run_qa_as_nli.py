@@ -564,7 +564,8 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
     # Load data features from cache or dataset file
     cached_features_file = os.path.join(
         args.data_dir,
-        "cached_{}_{}_{}_{}_{}".format(
+        "cached_passage-{}_{}_{}_{}_{}_{}".format(
+            ("static" if agrs.static_passage else "reg"),
             args.hypothesis_type,
             cached_mode,
             args.model_name_or_path.replace(
@@ -575,7 +576,8 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
         ),
     ) if not args.subset else os.path.join(
         args.data_dir,
-        "cached_subset-{}_{}_{}_{}_{}_{}".format(
+        "cached_passage-{}_subset-{}_{}_{}_{}_{}_{}".format(
+            ("static" if agrs.static_passage else "reg"),
             args.subset,
             args.hypothesis_type,
             cached_mode,
