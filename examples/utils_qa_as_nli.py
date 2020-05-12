@@ -185,7 +185,7 @@ class SingleChoiceProcessor(DataProcessor):
     def _create_examples(self, data, hypothesis_type, static=False):
         """Creates examples for the training and dev sets."""
         examples = []
-        hyp_column = "_".join(["hypothesis", hypothesis_type])
+        hyp_column = "_".join(["hypothesis", hypothesis_type]) if hypothesis_type is not None else "hypothesis"
         if static:
             logger.info("Using Static Premise!")
 
