@@ -694,9 +694,9 @@ def main():
     )
     parser.add_argument(
         "--hypothesis_type",
-        default='hybrid',
+        default=None,
         type=str,
-        required=True,
+        required=False,
         choices=['qa', 'rule', 'neural', 'hybrid'],
         help="The type of the hypothesis to use selected from the list: "
         + ", ".join(['qa', 'rule', 'neural', 'hybrid']),
