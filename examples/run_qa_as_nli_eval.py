@@ -415,6 +415,8 @@ def main():
         help="The output directory where the model predictions "
         "and checkpoints will be written. If using wandb, this will be ignored and output dir"
         " will be created by wandb and printed in the log.")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resume", action='store_true')
 
     # Other parameters
     parser.add_argument(
@@ -514,8 +516,7 @@ def main():
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args) if not (args.do_eval
-                                              or args.do_test) else args
+        args = reset_output_dir(args) 
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
@@ -559,7 +560,7 @@ def main():
         device,
         args.n_gpu,
         bool(args.local_rank != -1),
-        args.fp16,
+        False,
     )
     logger.info(f"Using  {args.n_gpu} gpus")
 
@@ -585,20 +586,10 @@ def main():
     # Evaluation
     results = {}
 
-    if args.do_eval and args.local_rank in [-1, 0]:
+    if True:
         tokenizer = tokenizer_class.from_pretrained(
-            args.output_dir, do_lower_case=args.do_lower_case)
+            args.model_name_or_path, do_lower_case=args.do_lower_case)
         checkpoints = [args.model_name_or_path]
-
-        if args.eval_all_checkpoints:
-            checkpoints = list(
-                os.path.dirname(c) for c in sorted(
-                    glob.glob(
-                        args.output_dir + "/**/" + WEIGHTS_NAME,
-                        recursive=True)))
-            logging.getLogger("transformers.modeling_utils").setLevel(
-                logging.WARN)  # Reduce logging
-        logger.info("Evaluate the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
             true_checkpoint = False
