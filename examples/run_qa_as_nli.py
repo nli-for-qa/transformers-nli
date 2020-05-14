@@ -515,11 +515,11 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
                 with open(hidden_states_file, "a+") as f:
                     writer = csv.writer(f)
-                    writer.writerow(hidden_states.detach().cpu().numpy())
+                    writer.writerow([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states])
                 attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
                 with open(attentions_file, "a+") as f:
                     writer = csv.writer(f)
-                    writer.writerow(attentions.detach().cpu().numpy())
+                    writer.writerow([attention.detach().cpu().numpy() for attention in attentions])
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
