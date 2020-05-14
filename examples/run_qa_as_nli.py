@@ -477,6 +477,17 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
     nb_eval_steps = 0
     scores = None
     out_label_ids = None
+    hidden_states = None
+    attentions = None
+
+    # Create a fresh file
+    if args.save_model_internals:
+        hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
+        with open(pred_file, "w") as f:
+            None
+        attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
+        with open(pred_file, "a+") as f:
+            None
 
     for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
         model.eval()
@@ -497,6 +508,18 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
             outputs = model(**inputs)
             tmp_eval_loss, logits = outputs[:2]
+
+            # Write Model Internals
+            if args.save_model_internals:
+                hidden_states, attentions = outputs[2:]
+                hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
+                with open(pred_file, "a+") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(hidden_states.detach().cpu().numpy())
+                attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
+                with open(pred_file, "a+") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(attentions.detach().cpu().numpy())
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
@@ -770,6 +793,10 @@ def main():
         action="store_true",
         help="Whether to save predictions.")
     parser.add_argument(
+        "--save_model_internals",
+        action="store_true",
+        help="Whether to save model internals.")
+    parser.add_argument(
         "--evaluate_during_training",
         action="store_true",
         help="Rul evaluation during training at each logging step.",
@@ -1005,6 +1032,9 @@ def main():
         finetuning_task=args.task_name,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
+    config.output_attentions=args.save_model_internals
+    config.output_hidden_states=args.save_model_internals
+
     tokenizer = tokenizer_class.from_pretrained(
         args.tokenizer_name
 
