@@ -1032,9 +1032,6 @@ def main():
         finetuning_task=args.task_name,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
-    config.output_attentions=args.save_model_internals
-    config.output_hidden_states=args.save_model_internals
-
     tokenizer = tokenizer_class.from_pretrained(
         args.tokenizer_name
 
@@ -1130,7 +1127,10 @@ def main():
             # parent of all ckpt dirs. We need the prefix then.
             prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 else ""
 
-            model = model_class.from_pretrained(checkpoint)
+            if args.save_model_internals:
+                model = model_class.from_pretrained(checkpoint, output_attentions=True, output_hidden_states=True)
+            else:
+                model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
 
             result = evaluate(args, model, tokenizer, prefix=prefix)
