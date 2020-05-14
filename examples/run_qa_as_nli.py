@@ -483,10 +483,10 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
     # Create a fresh file
     if args.save_model_internals:
         hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
-        with open(pred_file, "w") as f:
+        with open(hidden_states_file, "w") as f:
             None
         attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
-        with open(pred_file, "a+") as f:
+        with open(attentions_file, "a+") as f:
             None
 
     for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
@@ -513,11 +513,11 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             if args.save_model_internals:
                 hidden_states, attentions = outputs[2:]
                 hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
-                with open(pred_file, "a+") as f:
+                with open(hidden_states_file, "a+") as f:
                     writer = csv.writer(f)
                     writer.writerow(hidden_states.detach().cpu().numpy())
                 attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
-                with open(pred_file, "a+") as f:
+                with open(attentions_file, "a+") as f:
                     writer = csv.writer(f)
                     writer.writerow(attentions.detach().cpu().numpy())
 
