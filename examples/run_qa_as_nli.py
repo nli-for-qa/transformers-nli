@@ -22,6 +22,7 @@ import logging
 import os
 import random
 import csv
+import pickle
 
 import numpy as np
 import torch
@@ -482,11 +483,11 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
 
     # Create a fresh file
     if args.save_model_internals:
-        hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
+        hidden_states_file = os.path.join(eval_output_dir, prefix, "hidden-states.pkl")
         with open(hidden_states_file, "w") as f:
             None
-        attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
-        with open(attentions_file, "a+") as f:
+        attentions_file = os.path.join(eval_output_dir, prefix, "attentions.pkl")
+        with open(attentions_file, "w") as f:
             None
 
     for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
@@ -512,14 +513,12 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             # Write Model Internals
             if args.save_model_internals:
                 hidden_states, attentions = outputs[2:]
-                hidden_states_file = os.path.join(eval_output_dir, prefix, "_hidden-states.txt")
+                hidden_states_file = os.path.join(eval_output_dir, prefix, "hidden-states.pkl")
                 with open(hidden_states_file, "a+") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states])
-                attentions_file = os.path.join(eval_output_dir, prefix, "_attentions.txt")
+                    pickle.dump([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states], f)
+                attentions_file = os.path.join(eval_output_dir, prefix, "attentions.pkl")
                 with open(attentions_file, "a+") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([attention.detach().cpu().numpy() for attention in attentions])
+                    pickle.dump([attention.detach().cpu().numpy() for attention in attentions], f)
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
