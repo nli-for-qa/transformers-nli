@@ -515,10 +515,10 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 hidden_states, attentions = outputs[2:]
                 hidden_states_file = os.path.join(eval_output_dir, prefix, "hidden-states.pkl")
                 with open(hidden_states_file, "a+") as f:
-                    pickle.dump([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states], f)
+                    pickle.dump(np.array([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states]), f)
                 attentions_file = os.path.join(eval_output_dir, prefix, "attentions.pkl")
                 with open(attentions_file, "a+") as f:
-                    pickle.dump([attention.detach().cpu().numpy() for attention in attentions], f)
+                    pickle.dump(np.array([attention.detach().cpu().numpy() for attention in attentions]), f)
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
