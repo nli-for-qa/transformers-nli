@@ -25,6 +25,11 @@ import copy
 import csv
 import sys
 
+from typing import List, Tuple, Dict
+import torch
+from allennlp.training.metrics import Average
+from allennlp.training.metrics import Metric
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,6 +102,7 @@ class MultipleChoiceInputExample(object):
 
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
+
 class SemanticFragmentsInputExample(object):
     """A single training/test example for simple sequence classification."""
 
@@ -126,6 +132,7 @@ class SemanticFragmentsInputFeatures(object):
         self.segment_ids = segment_ids
         self.label_id = label_id
 
+
 class SingelChoiceInputFeatures(object):
     def __init__(self,
                  input_ids,
@@ -152,14 +159,18 @@ class MultipleChoiceInputFeatures(object):
 class DataProcessor():
     """Base class for data converters for QA as NLI tasks."""
 
-    def get_train_examples(self, data_dir, hypothesis_type, subset=None , use_static_passage=False):
+    def get_train_examples(self,
+                           data_dir,
+                           hypothesis_type,
+                           subset=None,
+                           use_static_passage=False):
         """See base class."""
 
         if subset in ['rule', 'neural']:
             return self._create_examples(
-                pd.read_json(os.path.join(
-                    data_dir, "train.json")).query('_'.join(['subset', subset])), 
-                hypothesis_type, use_static_passage)
+                pd.read_json(os.path.join(data_dir, "train.json")).query(
+                    '_'.join(['subset', subset])), hypothesis_type,
+                use_static_passage)
         elif subset is None:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "train.json")),
@@ -167,14 +178,18 @@ class DataProcessor():
         else:
             raise ValueError("Invalid subset flag")
 
-    def get_dev_examples(self, data_dir, hypothesis_type, subset=None, use_static_passage=False):
+    def get_dev_examples(self,
+                         data_dir,
+                         hypothesis_type,
+                         subset=None,
+                         use_static_passage=False):
         """See base class."""
 
         if subset in ['rule', 'neural']:
             return self._create_examples(
-                pd.read_json(os.path.join(
-                    data_dir, "dev.json")).query('_'.join(['subset', subset])), 
-                hypothesis_type, use_static_passage)
+                pd.read_json(os.path.join(data_dir, "dev.json")).query(
+                    '_'.join(['subset', subset])), hypothesis_type,
+                use_static_passage)
         elif subset is None:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "dev.json")),
@@ -182,14 +197,18 @@ class DataProcessor():
         else:
             raise ValueError("Invalid subset flag")
 
-    def get_test_examples(self, data_dir, hypothesis_type, subset=None, use_static_passage=False):
+    def get_test_examples(self,
+                          data_dir,
+                          hypothesis_type,
+                          subset=None,
+                          use_static_passage=False):
         """See base class."""
 
         if subset in ['rule', 'neural']:
             return self._create_examples(
-                pd.read_json(os.path.join(
-                    data_dir, "test.json")).query('_'.join(['subset', subset])), 
-                hypothesis_type, use_static_passage)
+                pd.read_json(os.path.join(data_dir, "test.json")).query(
+                    '_'.join(['subset', subset])), hypothesis_type,
+                use_static_passage)
         else:
             return self._create_examples(
                 pd.read_json(os.path.join(data_dir, "test.json")),
@@ -209,40 +228,59 @@ class DataProcessor():
         with open(input_file, "r") as f:
             reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
             lines = []
+
             for line in reader:
                 if sys.version_info[0] == 2:
                     line = list(unicode(cell, 'utf-8') for cell in line)
                 lines.append(line)
+
             return lines
+
 
 class SemanticFragmentsProcessor(DataProcessor):
     """Processor for the MultiNLI data set (GLUE version)."""
 
-    def get_train_examples(self, data_dir, hypothesis_type=None, subset=None, use_static_passage=False):
+    def get_train_examples(self,
+                           data_dir,
+                           hypothesis_type=None,
+                           subset=None,
+                           use_static_passage=False):
         """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "challenge_train.tsv")), "train")
 
-    def get_dev_examples(self, data_dir, hypothesis_type=None, subset=None, use_static_passage=False):
-        """See base class."""
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "challenge_dev.tsv")),"dev")
+            self._read_tsv(os.path.join(data_dir, "challenge_train.tsv")),
+            "train")
+
+    def get_dev_examples(self,
+                         data_dir,
+                         hypothesis_type=None,
+                         subset=None,
+                         use_static_passage=False):
+        """See base class."""
+
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "challenge_dev.tsv")), "dev")
 
     def get_labels(self, num_labels=None):
         """See base class."""
-        return ["ENTAILMENT","NEUTRAL","CONTRADICTION"]
+
+        return ["ENTAILMENT", "NEUTRAL", "CONTRADICTION"]
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
+
         for (i, line) in enumerate(lines):
-            guid = line[0] #"%s-%s" % (set_type, line[0])
+            guid = line[0]  # "%s-%s" % (set_type, line[0])
             text_a = line[1]
             text_b = line[2]
             label = line[3]
             examples.append(
-                SemanticFragmentsInputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
-        return examples 
+                SemanticFragmentsInputExample(
+                    guid=guid, text_a=text_a, text_b=text_b, label=label))
+
+        return examples
+
 
 class SingleChoiceProcessor(DataProcessor):
     """Processor for the RACE converted to NLI data set."""
@@ -255,7 +293,10 @@ class SingleChoiceProcessor(DataProcessor):
     def _create_examples(self, data, hypothesis_type, static=False):
         """Creates examples for the training and dev sets."""
         examples = []
-        hyp_column = "_".join(["hypothesis", hypothesis_type]) if hypothesis_type is not None else "hypothesis"
+        hyp_column = "_".join([
+            "hypothesis", hypothesis_type
+        ]) if hypothesis_type is not None else "hypothesis"
+
         if static:
             logger.info("Using Static Premise!")
 
@@ -286,6 +327,7 @@ class MultipleChoiceProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         hyp_column = "_".join(["hypothesis", hypothesis_type])
+
         if static:
             logger.info("Using Static Premise!")
 
@@ -303,25 +345,26 @@ class MultipleChoiceProcessor(DataProcessor):
 
         return examples
 
+
 def semantic_fragments_convert_examples_to_features(
-    examples, 
-    tokenizer, 
-    num_choices,
-    max_length=512,
-    label_list=None,
-    task=None,
-    output_mode=None,
-    pad_on_left=False,
-    pad_token=0,
-    pad_token_segment_id=0,
-    mask_padding_with_zero=True,
-    no_passage=False
-):
+        examples,
+        tokenizer,
+        num_choices,
+        max_length=512,
+        label_list=None,
+        task=None,
+        output_mode=None,
+        pad_on_left=False,
+        pad_token=0,
+        pad_token_segment_id=0,
+        mask_padding_with_zero=True,
+        no_passage=False):
     """Loads a data file into a list of `InputBatch`s."""
 
-    label_map = {label : i for i, label in enumerate(label_list)}
+    label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
+
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
@@ -329,6 +372,7 @@ def semantic_fragments_convert_examples_to_features(
         tokens_a = tokenizer.tokenize(example.text_a)
 
         tokens_b = None
+
         if example.text_b:
             tokens_b = tokenizer.tokenize(example.text_b)
             # Modifies `tokens_a` and `tokens_b` in place so that the total
@@ -337,6 +381,7 @@ def semantic_fragments_convert_examples_to_features(
             _truncate_seq_pair(tokens_a, tokens_b, max_length - 3)
         else:
             # Account for [CLS] and [SEP] with "- 2"
+
             if len(tokens_a) > max_length - 2:
                 tokens_a = tokens_a[:(max_length - 2)]
 
@@ -391,20 +436,24 @@ def semantic_fragments_convert_examples_to_features(
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
-            logger.info("tokens: %s" % " ".join(
-                    [str(x) for x in tokens]))
-            logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-            logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
+            logger.info("tokens: %s" % " ".join([str(x) for x in tokens]))
             logger.info(
-                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                "input_ids: %s" % " ".join([str(x) for x in input_ids]))
+            logger.info(
+                "input_mask: %s" % " ".join([str(x) for x in input_mask]))
+            logger.info(
+                "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info("label: %s (id = %d)" % (example.label, label_id))
 
         features.append(
-                SemanticFragmentsInputFeatures(input_ids=input_ids,
-                              input_mask=input_mask,
-                              segment_ids=segment_ids,
-                              label_id=label_id))
+            SemanticFragmentsInputFeatures(
+                input_ids=input_ids,
+                input_mask=input_mask,
+                segment_ids=segment_ids,
+                label_id=label_id))
+
     return features
+
 
 def single_choice_convert_examples_to_features(
         examples,
@@ -632,6 +681,7 @@ def multiple_choice_convert_examples_to_features(
 
     return features
 
+
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     """Truncates a sequence pair in place to the maximum length."""
 
@@ -639,14 +689,103 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     # one token at a time. This makes more sense than truncating an equal percent
     # of tokens from each, since if one sequence is very short then each token
     # that's truncated likely contains more information than a longer sequence.
+
     while True:
         total_length = len(tokens_a) + len(tokens_b)
+
         if total_length <= max_length:
             break
+
         if len(tokens_a) > len(tokens_b):
             tokens_a.pop()
         else:
             tokens_b.pop()
+
+
+class F1WithThreshold(Metric):
+    def __init__(self, flip_sign: bool = False) -> None:
+        """
+        Keep flip_sign=False if higher score => positive label
+        """
+        super().__init__()
+        self._scores: List = []
+        self._labels: List = []
+        self.flip_sign = flip_sign
+        self._threshold = None
+
+    def reset(self) -> None:
+        self._scores = []
+        self._labels = []
+
+    def __call__(self, scores: torch.Tensor, labels: torch.Tensor) -> None:
+        if len(scores.shape) != 1:
+            raise ValueError("Scores should be 1D")
+
+        if len(labels.shape) != 1:
+            raise ValueError("Labesl should be 1D")
+
+        if scores.shape != labels.shape:
+            raise ValueError("Shape of score should be same as labels")
+        temp_scores = scores.detach().cpu()
+
+        if self.flip_sign:
+            temp_scores = -1 * temp_scores
+        current_scores = temp_scores.tolist()
+        self._scores.extend(current_scores)
+        current_labels = labels.detach().cpu().tolist()
+        self._labels.extend(current_labels)
+
+    def compute_best_threshold_and_f1(
+            self) -> Tuple[float, float, float, float]:
+        # Assumes that lower scores have to be classified as pos
+
+        total_pos = sum(self._labels)
+        sorted_scores_and_labels = sorted(zip(self._scores, self._labels))
+        true_pos = 0.0
+        false_pos = 0.0
+        best_thresh = 0.0
+        best_f1 = 0.0
+        best_precision = 0.0
+        best_recall = 0.0
+
+        for score, label in sorted_scores_and_labels:
+            true_pos += label
+            false_pos += (1.0 - label)
+            precision = true_pos / (true_pos + false_pos + 1e-8)
+            recall = true_pos / total_pos
+            f1 = 2 * precision * recall / (precision + recall + 1e-8)
+
+            if f1 > best_f1:
+                best_thresh = score
+                best_precision = precision
+                best_recall = recall
+                best_f1 = f1
+
+        if self.flip_sign:
+            best_thresh = -1 * best_thresh
+        self._sorted_scores_and_labels = sorted_scores_and_labels
+        self._threshold = best_thresh
+
+        return best_thresh, best_f1, best_precision, best_recall
+
+    def get_metric(self, reset: bool) -> Dict:
+        # this is an expensive operation,
+        # lets do it only once when reset is true
+
+        if reset:
+            thresh, f1, precision, recall = self.compute_best_threshold_and_f1(
+            )
+            self.reset()
+        else:
+            thresh, f1, precision, recall = (0, 0, 0, 0)
+
+        return {
+            'threshold': thresh,
+            'fscore': f1,
+            'precision': precision,
+            'recall': recall
+        }
+
 
 processors = {
     "single_choice": SingleChoiceProcessor,

@@ -43,7 +43,7 @@ from transformers import (
 
 from utils_qa_as_nli import convert_examples_to_features
 from utils_qa_as_nli import output_modes as output_modes
-from utils_qa_as_nli import processors as processors
+from utils_qa_as_nli import processors as processors, F1WithThreshold
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -347,7 +347,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
         all_token_type_ids = torch.tensor([f.segment_ids for f in features],
                                           dtype=torch.long)
         all_labels = torch.tensor([f.label_id for f in features],
-                                      dtype=torch.long)
+                                  dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask,
                             all_token_type_ids, all_labels)
@@ -524,7 +524,7 @@ def main():
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args) 
+        args = reset_output_dir(args)
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
