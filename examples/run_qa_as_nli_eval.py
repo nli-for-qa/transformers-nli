@@ -192,7 +192,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
-        f1_metric(logits.detach().cpu().numpy(), out_label_ids)
+        f1_metric(logits.detach().cpu(), inputs["labels"].detach().cpu())
 
     eval_loss = eval_loss / nb_eval_steps
 
