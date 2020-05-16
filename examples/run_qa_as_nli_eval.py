@@ -28,6 +28,7 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
+from allennlp.training.metrics import F1Measure
 
 from transformers import (
     WEIGHTS_NAME,
@@ -148,6 +149,8 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
 
     if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
         model = torch.nn.DataParallel(model)
+    # 
+    f1_metric = F1Measure(positive_label=1)
 
     # Eval!
     logger.info("***** Running evaluation {} *****".format(prefix))
@@ -189,6 +192,8 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
+        f1_metric(logits.detach().cpu().numpy(), out_label_ids)
+
     eval_loss = eval_loss / nb_eval_steps
 
     if args.output_mode == "classification":
@@ -197,7 +202,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         preds = np.squeeze(scores)
     # result = compute_metrics(eval_task, preds, out_label_ids)
     acc = simple_accuracy(preds, out_label_ids)
-
+    precision, recall, f1 = f1_metric.get_metric(reset=1)
     if args.save_preds:
         pred_file = os.path.join(eval_output_dir, prefix,
                                  ("test" if test else "eval") + "_preds.txt")
@@ -210,7 +215,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer = csv.writer(f)
             writer.writerow(scores)
 
-    result = {"eval_acc": acc, "eval_loss": eval_loss}
+    result = {"eval_acc": acc, "eval_loss": eval_loss, "eval_f1": f1, "eval_precision": precision, "eval_recall": recall}
 
     results.update(result)
 
