@@ -672,6 +672,15 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
             select_field(features, "segment_ids"), dtype=torch.long)
         all_labels = torch.tensor([f.label for f in features],
                                   dtype=torch.long)
+    elif task in ['semantic_fragments']:
+        all_input_ids = torch.tensor([f.input_ids for f in features],
+                                     dtype=torch.long)
+        all_attention_mask = torch.tensor([f.input_mask for f in features],
+                                          dtype=torch.long)
+        all_token_type_ids = torch.tensor([f.segment_ids for f in features],
+                                          dtype=torch.long)
+        all_labels = torch.tensor([f.label_id for f in features],
+                                      dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask,
                             all_token_type_ids, all_labels)
