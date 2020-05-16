@@ -779,12 +779,7 @@ class F1WithThreshold(Metric):
         else:
             thresh, f1, precision, recall = (0, 0, 0, 0)
 
-        return {
-            'threshold': thresh,
-            'fscore': f1,
-            'precision': precision,
-            'recall': recall
-        }
+        return precision, recall, f1, thresh
 
 
 processors = {

@@ -28,7 +28,6 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
-from allennlp.training.metrics import F1Measure
 
 from transformers import (
     WEIGHTS_NAME,
@@ -45,6 +44,7 @@ from transformers import (
 from utils_qa_as_nli import convert_examples_to_features
 from utils_qa_as_nli import output_modes as output_modes
 from utils_qa_as_nli import processors as processors, F1WithThreshold
+from allennlp.training.metrics import F1Measure
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -121,6 +121,14 @@ def simple_accuracy(preds, labels):
     return (preds == labels).mean()
 
 
+def thresold_based_accuracy(scores, labels, threshold):
+    preds = (scores > threshold)
+    assert scores.dtype == threshold.dtype
+    assert preds.dtype == labels.dtype
+
+    return (preds == labels).mean(), preds
+
+
 def select_field(features, field):
     return [[choice[field] for choice in feature.choices_features]
             for feature in features]
@@ -149,8 +157,16 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
 
     if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
         model = torch.nn.DataParallel(model)
-    # 
-    f1_metric = F1Measure(positive_label=1)
+    #
+
+    if 'nli-transferable' in args.model_class:
+        f1_metric = F1WithThreshold()
+        logger.info("Using F1 with thresold")
+        logger.info(
+            "It will assume that the second entry in logits is the score")
+    else:
+        logger.info("Using regular F1 metric")
+        f1_metric = F1Measure(positive_label=1)
 
     # Eval!
     logger.info("***** Running evaluation {} *****".format(prefix))
@@ -192,17 +208,28 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
-        f1_metric(logits.detach().cpu(), inputs["labels"].detach().cpu())
+        if 'nli-transferable' in args.model_type:
+            f1_metric(logits[:, -1].detach().cpu(),
+                      inputs["labels"].detach().cpu())
+        else:
+            f1_metric(logits.detach().cpu(), inputs["labels"].detach().cpu())
 
     eval_loss = eval_loss / nb_eval_steps
 
-    if args.output_mode == "classification":
-        preds = np.argmax(scores, axis=1)
-    elif args.output_mode == "regression":
-        preds = np.squeeze(scores)
-    # result = compute_metrics(eval_task, preds, out_label_ids)
-    acc = simple_accuracy(preds, out_label_ids)
-    precision, recall, f1 = f1_metric.get_metric(reset=1)
+    if 'nli-transferable' not in args.model_type:
+        if args.output_mode == "classification":
+            preds = np.argmax(scores, axis=1)
+        elif args.output_mode == "regression":
+            preds = np.squeeze(scores)
+        # result = compute_metrics(eval_task, preds, out_label_ids)
+
+        acc = simple_accuracy(preds, out_label_ids)
+        precision, recall, f1 = f1_metric.get_metric(reset=True)
+        threshold = None
+    else:
+        precision, recall, f1, threshold = f1_metric.get_metric(reset=True)
+        acc, preds = thresold_based_accuracy(scores[:, -1], out_label_ids)
+
     if args.save_preds:
         pred_file = os.path.join(eval_output_dir, prefix,
                                  ("test" if test else "eval") + "_preds.txt")
@@ -215,7 +242,14 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer = csv.writer(f)
             writer.writerow(scores)
 
-    result = {"eval_acc": acc, "eval_loss": eval_loss, "eval_f1": f1, "eval_precision": precision, "eval_recall": recall}
+    result = {
+        "eval_acc": acc,
+        "eval_loss": eval_loss,
+        "eval_f1": f1,
+        "eval_precision": precision,
+        "eval_recall": recall,
+        "eval_threshold": threshold
+    }
 
     results.update(result)
 
