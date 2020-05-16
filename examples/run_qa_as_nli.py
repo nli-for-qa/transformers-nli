@@ -22,6 +22,7 @@ import logging
 import os
 import random
 import csv
+import pickle
 
 import numpy as np
 import torch
@@ -477,6 +478,17 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
     nb_eval_steps = 0
     scores = None
     out_label_ids = None
+    hidden_states = None
+    attentions = None
+
+    # Create a fresh file
+    if args.save_model_internals:
+        hidden_states_file = os.path.join(eval_output_dir, prefix, "hidden-states.npy")
+        with open(hidden_states_file, "wb") as f:
+            None
+        attentions_file = os.path.join(eval_output_dir, prefix, "attentions.npy")
+        with open(attentions_file, "wb") as f:
+            None
 
     for batch in tqdm(eval_dataloader, desc="Evaluating", miniters=100):
         model.eval()
@@ -498,6 +510,17 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             outputs = model(**inputs)
             tmp_eval_loss, logits = outputs[:2]
 
+            # Write Model Internals
+            if args.save_model_internals:
+                hidden_states, attentions = outputs[2:]
+
+                hidden_states_file = os.path.join(eval_output_dir, prefix, "hidden-states.npy")
+                with open(hidden_states_file, "ab") as f:
+                    np.save(f, np.array([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states]))
+                attentions_file = os.path.join(eval_output_dir, prefix, "attentions.npy")
+                with open(attentions_file, "ab") as f:
+                    np.save(f, np.array([attention.detach().cpu().numpy() for attention in attentions]))
+
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
 
@@ -508,6 +531,8 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             scores = np.append(scores, logits.detach().cpu().numpy(), axis=0)
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+        if args.save_model_internals:
+            break
 
     eval_loss = eval_loss / nb_eval_steps
 
@@ -650,6 +675,15 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
             select_field(features, "segment_ids"), dtype=torch.long)
         all_labels = torch.tensor([f.label for f in features],
                                   dtype=torch.long)
+    elif task in ['semantic_fragments']:
+        all_input_ids = torch.tensor([f.input_ids for f in features],
+                                     dtype=torch.long)
+        all_attention_mask = torch.tensor([f.input_mask for f in features],
+                                          dtype=torch.long)
+        all_token_type_ids = torch.tensor([f.segment_ids for f in features],
+                                          dtype=torch.long)
+        all_labels = torch.tensor([f.label_id for f in features],
+                                      dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask,
                             all_token_type_ids, all_labels)
@@ -697,7 +731,7 @@ def main():
         default=None,
         type=str,
         required=False,
-        choices=['qa', 'rule', 'neural', 'hybrid'],
+        choices=['qa_adv', 'qa', 'rule', 'neural', 'hybrid'],
         help="The type of the hypothesis to use selected from the list: "
         + ", ".join(['qa', 'rule', 'neural', 'hybrid']),
     )
@@ -769,6 +803,10 @@ def main():
         "--save_preds",
         action="store_true",
         help="Whether to save predictions.")
+    parser.add_argument(
+        "--save_model_internals",
+        action="store_true",
+        help="Whether to save model internals.")
     parser.add_argument(
         "--evaluate_during_training",
         action="store_true",
@@ -1100,7 +1138,10 @@ def main():
             # parent of all ckpt dirs. We need the prefix then.
             prefix = checkpoint.split("/")[-1] if len(checkpoints) > 1 else ""
 
-            model = model_class.from_pretrained(checkpoint)
+            if args.save_model_internals:
+                model = model_class.from_pretrained(checkpoint, output_attentions=True, output_hidden_states=True)
+            else:
+                model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
 
             result = evaluate(args, model, tokenizer, prefix=prefix)
