@@ -513,6 +513,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             # Write Model Internals
             if args.save_model_internals:
                 hidden_states, attentions = outputs[2:]
+
                 hidden_states_file = os.path.join(eval_output_dir, prefix, "hidden-states.npy")
                 with open(hidden_states_file, "ab") as f:
                     np.save(f, np.array([hidden_state.detach().cpu().numpy() for hidden_state in hidden_states]))
