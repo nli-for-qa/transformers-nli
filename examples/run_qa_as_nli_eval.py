@@ -122,8 +122,7 @@ def simple_accuracy(preds, labels):
 
 
 def thresold_based_accuracy(scores, labels, threshold):
-    preds = (scores > threshold)
-    assert scores.dtype == threshold.dtype
+    preds = (scores <= threshold).astype('int')
     assert preds.dtype == labels.dtype
 
     return (preds == labels).mean(), preds
@@ -159,7 +158,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         model = torch.nn.DataParallel(model)
     #
 
-    if 'nli-transferable' in args.model_class:
+    if 'nli-transferable' in args.model_type:
         f1_metric = F1WithThreshold()
         logger.info("Using F1 with thresold")
         logger.info(
@@ -209,7 +208,9 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
         if 'nli-transferable' in args.model_type:
-            f1_metric(logits[:, -1].detach().cpu(),
+            # send neg class scores because threshold algorithm assumes
+            # lesser the score better it is
+            f1_metric(logits[:, 0].detach().cpu(),
                       inputs["labels"].detach().cpu())
         else:
             f1_metric(logits.detach().cpu(), inputs["labels"].detach().cpu())
@@ -228,7 +229,9 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         threshold = None
     else:
         precision, recall, f1, threshold = f1_metric.get_metric(reset=True)
-        acc, preds = thresold_based_accuracy(scores[:, -1], out_label_ids)
+        # send neg class scores because threshold algorithm assumes
+        # lesser the score better it is
+        acc, preds = thresold_based_accuracy(scores[:, 0], out_label_ids, threshold)
 
     if args.save_preds:
         pred_file = os.path.join(eval_output_dir, prefix,
