@@ -287,6 +287,12 @@ def evaluate(args, model, tokenizer, prefix=""):
         with open(score_file, "w") as f:
             writer = csv.writer(f)
             writer.writerow(scores)
+        label_file = os.path.join(
+            eval_output_dir, prefix,
+            ("test" if args.test else "eval") + "_labels.txt")
+        with open(label_file, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(out_label_ids)
 
     if args.test:
         p = "test" if args.test else "eval"
