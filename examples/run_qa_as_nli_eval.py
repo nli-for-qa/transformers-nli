@@ -294,8 +294,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             writer = csv.writer(f)
             writer.writerow(out_label_ids)
 
-    if args.test:
-        p = "test" if args.test else "eval"
+    p = "test" if args.test else "eval"
     result = {
         p + "_acc": acc,
         p + "_loss": eval_loss,
