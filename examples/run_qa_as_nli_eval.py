@@ -28,6 +28,7 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
+from sklearn.metrics import balanced_accuracy_score
 
 from transformers import (
     WEIGHTS_NAME,
@@ -135,6 +136,10 @@ def thresold_based_accuracy(scores, labels, threshold):
     assert preds.dtype == labels.dtype
 
     return (preds == labels).mean(), preds
+
+
+def balanced_accuracy(preds, labels):
+    return balanced_accuracy_score(labels, preds)
 
 
 def select_field(features, field):
@@ -258,6 +263,7 @@ def evaluate(args, model, tokenizer, prefix=""):
         acc = simple_accuracy(preds, out_label_ids)
         precision, recall, f1 = f1_metric.get_metric(reset=True)
         threshold = None
+        balanced_acc = balanced_accuracy(preds, out_label_ids)
     elif args.threshold is not None:
         # using fixed threshold
         precision, recall, f1 = f1_metric.get_metric(reset=True)
@@ -266,6 +272,8 @@ def evaluate(args, model, tokenizer, prefix=""):
         # lesser the score better it is
         acc, preds = thresold_based_accuracy(scores[:, 0], out_label_ids,
                                              threshold)
+        balanced_acc = balanced_accuracy(preds, out_label_ids)
+
     else:
         # using computed threshold
         precision, recall, f1, threshold = f1_metric.get_metric(reset=True)
@@ -273,6 +281,7 @@ def evaluate(args, model, tokenizer, prefix=""):
         # lesser the score better it is
         acc, preds = thresold_based_accuracy(scores[:, 0], out_label_ids,
                                              threshold)
+        balanced_acc = balanced_accuracy(preds, out_label_ids)
 
     if args.save_preds:
         pred_file = os.path.join(
@@ -297,6 +306,7 @@ def evaluate(args, model, tokenizer, prefix=""):
     p = "test" if args.test else "eval"
     result = {
         p + "_acc": acc,
+        p + "_balanced_acc": balanced_acc,
         p + "_loss": eval_loss,
         p + "_f1": f1,
         p + "_precision": precision,
