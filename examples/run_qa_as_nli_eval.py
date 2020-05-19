@@ -28,7 +28,7 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
-from allennlp.training.metrics import F1Measure
+from sklearn.metrics import balanced_accuracy_score
 
 from transformers import (
     WEIGHTS_NAME,
@@ -44,7 +44,8 @@ from transformers import (
 
 from utils_qa_as_nli import convert_examples_to_features
 from utils_qa_as_nli import output_modes as output_modes
-from utils_qa_as_nli import processors as processors
+from utils_qa_as_nli import processors as processors, F1WithThreshold
+from allennlp.training.metrics import F1Measure
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -121,12 +122,32 @@ def simple_accuracy(preds, labels):
     return (preds == labels).mean()
 
 
+def get_scores_using_threshold(score, threshold):
+    score_for_positive_class = (score.detach().cpu() <= threshold).float()
+    final_logits = torch.stack(
+        (1.0 - score_for_positive_class, score_for_positive_class),
+        dim=-1)  # (batch,2)
+
+    return final_logits
+
+
+def thresold_based_accuracy(scores, labels, threshold):
+    preds = (scores <= threshold).astype('int')
+    assert preds.dtype == labels.dtype
+
+    return (preds == labels).mean(), preds
+
+
+def balanced_accuracy(preds, labels):
+    return balanced_accuracy_score(labels, preds)
+
+
 def select_field(features, field):
     return [[choice[field] for choice in feature.choices_features]
             for feature in features]
 
 
-def evaluate(args, model, tokenizer, prefix="", test=False):
+def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_name = args.task_name
     eval_output_dir = args.output_dir
@@ -134,7 +155,11 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
     results = {}
 
     eval_dataset = load_and_cache_examples(
-        args, eval_task_name, tokenizer, evaluate=not test, test=test)
+        args,
+        eval_task_name,
+        tokenizer,
+        evaluate=not args.test,
+        test=args.test)
 
     if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
         os.makedirs(eval_output_dir)
@@ -149,11 +174,30 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
 
     if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
         model = torch.nn.DataParallel(model)
-    # 
-    f1_metric = F1Measure(positive_label=1)
+    #
+
+    if args.use_threshold and args.threshold is None:
+        # need to compute the threshold
+        f1_metric = F1WithThreshold()
+        logger.info("Using F1 with thresold computation")
+        logger.info(
+            "It will assume that the second entry in logits is the score")
+    else:
+        # args.use_threshold and args.threshold is not None
+        # or
+        # not args.use_threshold
+
+        if not args.use_threshold:
+            logger.info("Using regular F1 metric without threshold")
+        else:  # not None
+            logger.info(
+                "Using regular F1 metrics with fixed threshold of {}".format(
+                    args.threshold))
+        f1_metric = F1Measure(positive_label=1)
 
     # Eval!
-    logger.info("***** Running evaluation {} *****".format(prefix))
+    logger.info("***** Running evaluation on {} set {} *****".format(
+        "test" if args.test else "dev", prefix))
     logger.info("  Num examples = %d", len(eval_dataset))
     logger.info("  Batch size = %d", args.eval_batch_size)
     eval_loss = 0.0
@@ -192,38 +236,92 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             out_label_ids = np.append(
                 out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
-        f1_metric(logits.detach().cpu(), inputs["labels"].detach().cpu())
+        if args.use_threshold and args.threshold is None:
+            # send neg class scores because threshold algorithm assumes
+            # lesser the score better it is
+            f1_metric(logits[:, 0].detach().cpu(),
+                      inputs["labels"].detach().cpu())
+        elif args.use_threshold and args.threshold is not None:
+            # threshold is given. We use it to get preds first and use those as logits for eval
+            final_logits = get_scores_using_threshold(logits[:, 0],
+                                                      args.threshold)
+            f1_metric(final_logits, inputs["labels"].detach().cpu())
+        else:
+            # not args.use_threshold => mcq or nli without threshold
+            f1_metric(logits.detach().cpu(), inputs["labels"].detach().cpu())
 
     eval_loss = eval_loss / nb_eval_steps
 
-    if args.output_mode == "classification":
-        preds = np.argmax(scores, axis=1)
-    elif args.output_mode == "regression":
-        preds = np.squeeze(scores)
-    # result = compute_metrics(eval_task, preds, out_label_ids)
-    acc = simple_accuracy(preds, out_label_ids)
-    precision, recall, f1 = f1_metric.get_metric(reset=1)
+    if not args.use_threshold:
+        # mcq model or nli without threshold
+
+        if args.output_mode == "classification":
+            preds = np.argmax(scores, axis=1)
+        elif args.output_mode == "regression":
+            preds = np.squeeze(scores)
+
+        acc = simple_accuracy(preds, out_label_ids)
+        precision, recall, f1 = f1_metric.get_metric(reset=True)
+        threshold = None
+        balanced_acc = balanced_accuracy(preds, out_label_ids)
+    elif args.threshold is not None:
+        # using fixed threshold
+        precision, recall, f1 = f1_metric.get_metric(reset=True)
+        threshold = args.threshold
+        # send neg class scores because threshold algorithm assumes
+        # lesser the score better it is
+        acc, preds = thresold_based_accuracy(scores[:, 0], out_label_ids,
+                                             threshold)
+        balanced_acc = balanced_accuracy(preds, out_label_ids)
+
+    else:
+        # using computed threshold
+        precision, recall, f1, threshold = f1_metric.get_metric(reset=True)
+        # send neg class scores because threshold algorithm assumes
+        # lesser the score better it is
+        acc, preds = thresold_based_accuracy(scores[:, 0], out_label_ids,
+                                             threshold)
+        balanced_acc = balanced_accuracy(preds, out_label_ids)
+
     if args.save_preds:
-        pred_file = os.path.join(eval_output_dir, prefix,
-                                 ("test" if test else "eval") + "_preds.txt")
+        pred_file = os.path.join(
+            eval_output_dir, prefix,
+            ("test" if args.test else "eval") + "_preds.txt")
         with open(pred_file, "w") as f:
             writer = csv.writer(f)
             writer.writerow(preds)
-        score_file = os.path.join(eval_output_dir, prefix,
-                                  ("test" if test else "eval") + "_scores.txt")
+        score_file = os.path.join(
+            eval_output_dir, prefix,
+            ("test" if args.test else "eval") + "_scores.txt")
         with open(score_file, "w") as f:
             writer = csv.writer(f)
             writer.writerow(scores)
+        label_file = os.path.join(
+            eval_output_dir, prefix,
+            ("test" if args.test else "eval") + "_labels.txt")
+        with open(label_file, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(out_label_ids)
 
-    result = {"eval_acc": acc, "eval_loss": eval_loss, "eval_f1": f1, "eval_precision": precision, "eval_recall": recall}
+    p = "test" if args.test else "eval"
+    result = {
+        p + "_acc": acc,
+        p + "_balanced_acc": balanced_acc,
+        p + "_loss": eval_loss,
+        p + "_f1": f1,
+        p + "_precision": precision,
+        p + "_recall": recall,
+        p + "_threshold": threshold
+    }
 
     results.update(result)
 
     output_eval_file = os.path.join(
-        eval_output_dir, prefix, ("test" if test else "eval") + "_results.txt")
+        eval_output_dir, prefix,
+        ("test" if args.test else "eval") + "_results.txt")
 
     with open(output_eval_file, "w") as writer:
-        logger.info("***** " + ("Test" if test else "Eval")
+        logger.info("***** " + ("Test" if args.test else "Eval")
                     + " results {} *****".format(prefix))
 
         for key in sorted(result.keys()):
@@ -352,7 +450,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, test=False):
         all_token_type_ids = torch.tensor([f.segment_ids for f in features],
                                           dtype=torch.long)
         all_labels = torch.tensor([f.label_id for f in features],
-                                      dtype=torch.long)
+                                  dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask,
                             all_token_type_ids, all_labels)
@@ -416,6 +514,19 @@ def main():
         type=str,
         choices=['rule', 'neural'],
         help="Which subset of data to use.")
+    parser.add_argument(
+        '--test',
+        action='store_true',
+        help='evaluate on test set instead of dev')
+    parser.add_argument(
+        '--use_threshold',
+        action='store_true',
+        help='For nli models to use threshold instead of implicit default of 0.5')
+    parser.add_argument(
+        '--threshold',
+        type=float,
+        help="Use this threshold instead of finding one. Should always be given for --test and --use_threshold"
+    )
     parser.add_argument(
         "--static_passage",
         action="store_true",
@@ -526,10 +637,29 @@ def main():
 
     args = parser.parse_args()
 
+    # some validation
+
+    if 'nli-transferable' in args.model_type:
+        if not args.use_threshold:
+            logger.warning(
+                "Using NLI model but not using threshold."
+                "\n This will not work if transfering from a mcq model")
+        else:
+            if args.test and (args.threshold is None):
+                raise ValueError(
+                    "threshold must be supplied if using threshold based test eval"
+                )
+    else:
+        args.threshold = None  # force set it to None
+        args.use_threshold = False
+        logger.info(
+            "Will not use threshold for non-binary classification. Will be ignored if supplied."
+        )
+
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args) 
+        args = reset_output_dir(args)
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
