@@ -448,7 +448,7 @@ def train(args, train_dataset, model, tokenizer):
 
     return global_step, tr_loss / global_step
 
-def save_model(args, model, tokenizer, output_dir):
+def save_model(args, model, tokenizer, optimizer, scheduler, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     model_to_save = (
