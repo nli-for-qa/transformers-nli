@@ -367,7 +367,7 @@ def train(args, train_dataset, model, tokenizer):
                             best_dev_acc = results["eval_acc"]
                             best_steps = global_step
                             # Save model checkpoint
-                            save_model(args, model, tokenizer, os.path.join(args.output_dir, "best-model"))
+                            save_model(args, model, tokenizer, optimizer, scheduler, os.path.join(args.output_dir, "best-model"))
 
                             if args.do_test:
                                 results_test = evaluate(
@@ -410,7 +410,7 @@ def train(args, train_dataset, model, tokenizer):
                     output_dir = os.path.join(
                         args.output_dir, "checkpoint-{}".format(global_step))
 
-                    save_model(args, model, tokenizer, output_dir)
+                    save_model(args, model, tokenizer, optimizer, scheduler, output_dir)
                     # if not os.path.exists(output_dir):
                     #     os.makedirs(output_dir)
                     # model_to_save = (
