@@ -23,6 +23,7 @@ import os
 import random
 import csv
 import pickle
+import shutil
 
 import numpy as np
 import torch
@@ -367,9 +368,17 @@ def train(args, train_dataset, model, tokenizer):
                             best_dev_acc = results["eval_acc"]
                             best_steps = global_step
                             # Save model checkpoint
-                            save_model(args, model, tokenizer, optimizer, scheduler, os.path.join(args.output_dir, "best-model"))
+                            best_model_dir = os.path.join(args.output_dir, "best-model")
+                            save_model(args, model, tokenizer, optimizer, scheduler, best_model_dir)
 
-                            if args.do_test:
+                            # Copy over result files into best-model dir
+                            shutil.copy(os.path.join(args.output_dir, 'eval_results.txt'), best_model_dir)
+                            if args.save_preds:
+                                shutil.copy(os.path.join(args.output_dir, 'eval_preds.txt'), best_model_dir)
+                                shutil.copy(os.path.join(args.output_dir, 'eval_scores.txt'), best_model_dir)
+
+                            # By-passing this. Test will only be conducted on the best model at the end of training
+                            if False:#args.do_test:
                                 results_test = evaluate(
                                     args, model, tokenizer, test=True)
 
@@ -468,10 +477,9 @@ def save_model(args, model, tokenizer, optimizer, scheduler, output_dir):
     logger.info("Saving optimizer and scheduler states to %s",
                 output_dir)
 
-def evaluate(args, model, tokenizer, prefix="", test=False):
-    # Loop to handle MNLI double evaluation (matched, mis-matched)
+def evaluate(args, model, tokenizer, prefix="", test=False, result_dir=None):
     eval_task_name = args.task_name
-    eval_output_dir = args.output_dir
+    eval_output_dir = args.output_dir if result_dir is None else result_dir
 
     results = {}
 
@@ -1166,7 +1174,7 @@ def main():
                 model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
 
-            result = evaluate(args, model, tokenizer, prefix=prefix)
+            result = evaluate(args, model, tokenizer, prefix=prefix, result_dir=checkpoint)
 
             if global_step and args.wandb:
                 step = None
@@ -1192,13 +1200,14 @@ def main():
             results.update(result)
 
     if args.do_test and args.local_rank in [-1, 0]:
-        if not args.do_train:
-            args.output_dir = args.model_name_or_path
-        checkpoints = [args.output_dir]
+        # if not args.do_train:
+        #     args.output_dir = args.model_name_or_path
+        best_model_dir = os.path.join(args.output_dir, "best-model")
+        checkpoints = [best_model_dir] if args.do_train else [args.model_name_or_path]
         # if args.eval_all_checkpoints: # can not use this to do test!!
         #     checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
         #     logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
-        logger.info("Evaluate the following checkpoints: %s", checkpoints)
+        logger.info("Test the following checkpoints: %s", checkpoints)
 
         for checkpoint in checkpoints:
             global_step = checkpoint.split(
@@ -1209,7 +1218,7 @@ def main():
 
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
-            result = evaluate(args, model, tokenizer, prefix=prefix, test=True)
+            result = evaluate(args, model, tokenizer, prefix=prefix, test=True, result_dir=checkpoint)
             result = dict(
                 (k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
