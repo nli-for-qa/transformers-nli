@@ -15,7 +15,7 @@ source /mnt/nfs/scratch1/dhruveshpate/nli_for_qa/pytorch-transformers/examples/.
 export OMP_NUM_THREADS=2
 python run_qa_as_nli_eval.py \
     --model_type roberta-nli-transferable \
-    --model_name_or_path "/mnt/nfs/scratch1/dhruveshpate/nli_for_qa/models/RACE/hybrid-full/"\
+    --model_name_or_path "/mnt/nfs/scratch1/dhruveshpate/nli_for_qa/models/RACE/qa/"\
     --task_name single_choice \
     --num_choices 1 \
     --do_lower_case \
@@ -28,6 +28,6 @@ python run_qa_as_nli_eval.py \
     --wandb \
     --wandb_entity "ibm-cs696ds-2020" \
     --wandb_project nli4qa \
-    --wandb_run_name race-full-hybrid-factcc-eval \
-    --tags race-full,nli,hybrid,roberta-large,mc-transferable,eval
+    --wandb_run_name race-full-qa-factcc-eval \
+    --tags race-full,qa,roberta-large,mc-transferable,eval
 
