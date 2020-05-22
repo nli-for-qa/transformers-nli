@@ -997,8 +997,7 @@ def main():
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
         wandb_init(args)
-        args = reset_output_dir(args) if not (args.do_eval
-                                              or args.do_test) else args
+        args = reset_output_dir(args)
 
     if (os.path.exists(args.output_dir) and os.listdir(args.output_dir)
             and args.do_train and not args.overwrite_output_dir):
