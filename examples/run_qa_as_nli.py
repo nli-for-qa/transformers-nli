@@ -1142,15 +1142,16 @@ def main():
     results = {}
 
     if args.do_eval and args.local_rank in [-1, 0]:
+        model_dir = args.output_dir if args.do_train else args.model_name_or_path
         tokenizer = tokenizer_class.from_pretrained(
-            args.output_dir, do_lower_case=args.do_lower_case)
-        checkpoints = [args.output_dir]
+            model_dir, do_lower_case=args.do_lower_case)
+        checkpoints = [model_dir]
 
         if args.eval_all_checkpoints:
             checkpoints = list(
                 os.path.dirname(c) for c in sorted(
                     glob.glob(
-                        args.output_dir + "/**/" + WEIGHTS_NAME,
+                        model_dir + "/**/" + WEIGHTS_NAME,
                         recursive=True)))
             logging.getLogger("transformers.modeling_utils").setLevel(
                 logging.WARN)  # Reduce logging
