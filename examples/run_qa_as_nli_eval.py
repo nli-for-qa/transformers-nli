@@ -497,6 +497,7 @@ def main():
         "--hypothesis_type",
         default=None,
         type=str,
+        required=False,
         choices=['qa', 'rule', 'neural', 'hybrid'],
         help="The type of the hypothesis to use selected from the list: "
         + ", ".join(['qa', 'rule', 'neural', 'hybrid']),
