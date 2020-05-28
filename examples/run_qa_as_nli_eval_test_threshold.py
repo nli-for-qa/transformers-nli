@@ -622,22 +622,22 @@ def main():
 
     # some validation
 
-    if 'nli-transferable' in args.model_type:
-        if not args.use_threshold:
-            logger.warning(
-                "Using NLI model but not using threshold."
-                "\n This will not work if transfering from a mcq model")
-        else:
-            if args.test and (args.threshold is None):
-                raise ValueError(
-                    "threshold must be supplied if using threshold based test eval"
-                )
-    else:
-        args.threshold = None  # force set it to None
-        args.use_threshold = False
-        logger.info(
-            "Will not use threshold for non-binary classification. Will be ignored if supplied."
-        )
+    # if 'nli-transferable' in args.model_type:
+    #     if not args.use_threshold:
+    #         logger.warning(
+    #             "Using NLI model but not using threshold."
+    #             "\n This will not work if transfering from a mcq model")
+    #     else:
+    #         if args.test and (args.threshold is None):
+    #             raise ValueError(
+    #                 "threshold must be supplied if using threshold based test eval"
+    #             )
+    # else:
+    #     args.threshold = None  # force set it to None
+    #     args.use_threshold = False
+    #     logger.info(
+    #         "Will not use threshold for non-binary classification. Will be ignored if supplied."
+    #     )
 
     if args.wandb:
         args.tags = ','.join([args.task_name] + args.tags.split(","))
